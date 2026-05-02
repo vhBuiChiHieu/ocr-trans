@@ -1,76 +1,156 @@
-# 🗺️ Roadmap: Windows OCR Overlay Tool
-> Stack: Python 3.11 · PaddleOCR (GPU) · PyQt6 · OpenCV · mss
+# Roadmap: Windows OCR Overlay Tool
+
+> Stack định hướng: Python 3.11 · PaddleOCR · PyQt6 · OpenCV · mss
 
 ---
 
-## 📋 Tổng quan dự án
+## 1. Tổng quan dự án
 
 | Thông tin | Chi tiết |
 |---|---|
-| **Mục tiêu** | Overlay dịch thuật real-time cho Windows |
+| **Mục tiêu** | Tool Windows chụp vùng màn hình, OCR local, hiển thị text gốc dưới dạng overlay |
 | **Hotkey** | `Ctrl + Shift + Z` |
-| **OCR Engine** | PaddleOCR (local, GPU-accelerated) |
+| **OCR Engine** | PaddleOCR, ưu tiên GPU nhưng phải chạy được với CPU fallback |
 | **Hardware target** | Ryzen 5 7500F + RTX 5060 Ti 16GB |
 | **Ngôn ngữ** | Python 3.11+ |
+| **Ưu tiên giai đoạn đầu** | OCR ổn định trước, translation làm sau |
 
 ---
 
-## 🏗️ Kiến trúc tổng thể
+## 2. MVP scope và non-goals
 
-```
+### MVP cần đạt
+
+MVP của dự án là pipeline chạy được từ đầu tới cuối:
+
+1. Bấm hotkey toàn cục
+2. Chụp màn hình hiện tại
+3. Chọn vùng bằng overlay
+4. Crop ảnh theo vùng chọn
+5. Chạy OCR local
+6. Hiển thị text gốc bằng overlay nổi
+
+### MVP chưa bao gồm
+
+Các mục sau không phải trọng tâm của MVP ban đầu:
+
+- Translation API
+- System tray hoàn chỉnh
+- History UI
+- Settings panel đầy đủ
+- Quadrilateral selection
+- Tối ưu cho mọi game fullscreen exclusive
+- Packaging `.exe` sớm
+- Tối ưu cho mọi kiểu font khó ngay từ đầu
+
+Nguyên tắc: nếu một hạng mục không giúp validate pipeline OCR sớm hơn, không đẩy vào Phase 1.
+
+---
+
+## 3. Kiến trúc tổng thể
+
+```text
 [Hotkey Listener]
       │
       ▼
-[Screenshot] ──► mss
+[Screenshot Capture] ──► mss
       │
       ▼
-[Selection UI] ──► PyQt6 fullscreen transparent overlay
-      │               (vẽ rectangle / quadrilateral)
+[Selection Overlay] ──► PyQt6 fullscreen transparent overlay
+      │
+      ▼
+[Crop + Coordinate Mapping]
+      │
       ▼
 [Preprocessor] ──► OpenCV
-      │               - Upscale, denoise, contrast
-      │               - Perspective transform
-      ▼
-[OCR Engine] ──► PaddleOCR (CUDA / RTX 5060 Ti)
       │
       ▼
-[Translation] ──► API (Phase 3)
+[OCR Engine] ──► PaddleOCR (GPU ưu tiên, CPU fallback)
       │
       ▼
 [Result Overlay] ──► PyQt6 always-on-top, click-through
+      │
+      └──► [Translation Layer] (Phase 3)
 ```
+
+### App state tối thiểu
+
+App nên có state đơn giản ngay từ đầu để tránh logic chồng chéo:
+
+```text
+idle -> selecting -> processing -> showing_result -> idle
+```
+
+State này đủ cho MVP và giúp nối hotkey, overlay, OCR, dismiss logic gọn hơn.
 
 ---
 
-## 📦 Tech Stack
+## 4. Nguyên tắc triển khai
+
+| Nguyên tắc | Áp dụng |
+|---|---|
+| **OCR first** | Translation chỉ thêm sau khi OCR đã đủ ổn định |
+| **Validate sớm** | Có bộ ảnh mẫu và tiêu chí pass/fail từ Phase 1 |
+| **Fail mềm** | GPU lỗi vẫn fallback CPU, OCR fail không crash app |
+| **Không overbuild** | Chưa thêm tray/history/quadrilateral nếu chưa cần để validate lõi |
+| **Đo được** | Mỗi phase có deliverable và tiêu chí kiểm chứng rõ |
+| **Windows thực chiến** | Phải tính tới DPI scaling, multi-monitor, fullscreen app behavior |
+
+---
+
+## 5. Tech stack đề xuất
 
 | Layer | Thư viện | Mục đích |
 |---|---|---|
-| Hotkey | `pynput` | Capture global hotkey |
-| Screenshot | `mss` | Chụp màn hình nhanh (<10ms) |
+| Hotkey | `pynput` | Bắt global hotkey ở mức cơ bản |
+| Screenshot | `mss` | Chụp màn hình nhanh |
 | Selection UI | `PyQt6` | Overlay trong suốt để chọn vùng |
-| Preprocessing | `opencv-python` | Xử lý ảnh trước OCR |
-| OCR | `paddlepaddle-gpu` + `paddleocr` | OCR local, chạy GPU |
-| Translation | TBD (DeepL / Google) | Dịch EN → VI |
-| Result UI | `PyQt6` | Hiển thị kết quả dịch |
-| Packaging | `PyInstaller` | Build .exe |
+| Preprocessing | `opencv-python` | Tiền xử lý ảnh trước OCR |
+| OCR | `paddleocr` + `paddlepaddle-gpu` | OCR local, ưu tiên GPU |
+| Image conversion | `Pillow` | Chuyển đổi format khi cần |
+| Packaging | `PyInstaller` | Đóng gói `.exe` ở phase sau |
+
+### Ghi chú kỹ thuật
+
+- `pynput` đủ để bắt đầu, nhưng không nên coi là nghiệm đúng cho mọi game fullscreen exclusive.
+- `PaddleOCR` nên được preload khi app khởi động để tránh cold start quá lớn.
+- Cần chuẩn bị nhánh CPU fallback ngay từ giai đoạn đầu, không đợi tới lúc đóng gói.
+
+### Môi trường hiện tại đã verify
+
+Trạng thái này được ghi lại để làm mốc trước khi bắt đầu implement Phase 1:
+
+| Hạng mục | Trạng thái hiện tại |
+|---|---|
+| Python | `3.11.9` |
+| Virtual environment | `.venv` trong root project |
+| Core packages | `PyQt6`, `mss`, `opencv-python`, `pynput`, `Pillow`, `paddleocr` đã import OK |
+| Paddle runtime | `paddlepaddle-gpu==3.3.1` |
+| Paddle device | `gpu:0` |
+| OCR engine load | `PaddleOCR(lang='en')` load OK |
+| Model cache | Đã bắt đầu được tải vào cache người dùng qua PaddleX/PaddleOCR |
+
+Ghi chú quan trọng:
+- Với version hiện tại, `PaddleOCR` không nhận tham số `use_gpu=True` như một số ví dụ cũ.
+- Device nên được xác nhận qua `paddle.device.get_device()` thay vì giả định từ ví dụ cấu hình cũ.
+- Nếu sau này môi trường bị lệch, cần check lại Python path, `.venv`, và Paddle device trước khi debug code ứng dụng.
 
 ---
 
-## 🚀 Phase 1 — MVP Core (Tuần 1–2)
+## 6. Phase 1 — OCR Core MVP
 
-> **Mục tiêu:** Chụp → Chọn vùng → OCR → Hiển thị text gốc
+> **Mục tiêu:** Ra bản chạy được: hotkey → chọn vùng → OCR → overlay text gốc
 
-### 1.1 Thiết lập môi trường
+### 6.1 Thiết lập môi trường
 
-- [ ] Cài Python 3.11 (khuyến nghị dùng `pyenv` hoặc `conda`)
+- [ ] Cài Python 3.11
 - [ ] Tạo virtual environment
-- [ ] Cài CUDA Toolkit 12.x (tương thích RTX 5060 Ti)
-- [ ] Cài cuDNN tương ứng
-- [ ] Cài dependencies:
+- [ ] Cài dependencies cơ bản
+- [ ] Cài PaddleOCR theo hướng ưu tiên GPU
+- [ ] Kiểm tra app vẫn có thể chạy nếu GPU không khả dụng
 
 ```bash
-pip install paddlepaddle-gpu paddleocr
+pip install paddleocr
 pip install PyQt6
 pip install mss
 pip install opencv-python
@@ -78,37 +158,79 @@ pip install pynput
 pip install Pillow
 ```
 
-### 1.2 Hotkey Listener
+GPU setup nên được kiểm tra riêng theo máy. Không khóa roadmap vào một bản CUDA duy nhất ở giai đoạn đầu.
 
-- [ ] Đăng ký global hotkey `Ctrl + Shift + Z` bằng `pynput`
-- [ ] Chạy listener trong background thread (không block UI)
-- [ ] Test: hotkey hoạt động khi focus ở app khác (game, browser)
+### 6.2 App shell và lifecycle
 
-```python
-# Cấu trúc cơ bản
-from pynput import keyboard
+- [ ] Tạo `QApplication` và entry point tối thiểu
+- [ ] Tạo app controller hoặc state holder đơn giản
+- [ ] Khai báo state: `idle`, `selecting`, `processing`, `showing_result`
+- [ ] Thêm logging cơ bản ra console hoặc file
 
-HOTKEY = {keyboard.Key.ctrl, keyboard.Key.shift, keyboard.KeyCode.from_char('z')}
-```
+Deliverable:
+- App mở được
+- Có vòng đời rõ
+- Không block UI khi chuyển state
 
-### 1.3 Screenshot Module
+### 6.3 Hotkey listener
 
-- [ ] Chụp toàn bộ màn hình bằng `mss`
-- [ ] Hỗ trợ multi-monitor (lấy đúng monitor có cursor)
-- [ ] Convert sang format phù hợp cho PyQt6 và OpenCV
+- [ ] Đăng ký global hotkey `Ctrl + Shift + Z`
+- [ ] Chạy listener theo cách không block UI chính
+- [ ] Trigger được flow mở selection overlay
+- [ ] Test khi app khác đang được focus
 
-### 1.4 Selection UI Overlay
+Deliverable:
+- Bấm hotkey từ desktop hoặc app thường thì selection overlay bật lên được
+- Phase 1 chỉ cam kết hỗ trợ desktop, app thường, và app chạy windowed/borderless ở mức cơ bản
+- Fullscreen exclusive game behavior nằm ngoài phạm vi MVP ban đầu
 
-- [ ] Tạo PyQt6 window fullscreen, trong suốt, always-on-top
-- [ ] Vẽ darkened overlay lên screenshot
-- [ ] Cho phép kéo chuột để vẽ **rectangle**
-- [ ] Hiển thị tọa độ và kích thước vùng chọn real-time
-- [ ] Nhấn `Enter` để xác nhận, `Esc` để hủy
+### 6.4 Screenshot capture và mapping
 
-### 1.5 OCR Engine (PaddleOCR)
+- [ ] Chụp đúng màn hình hiện tại bằng `mss`
+- [ ] Xác định monitor liên quan tới vùng thao tác hoặc con trỏ
+- [ ] Chuẩn hóa mapping giữa screenshot pixel và tọa độ PyQt6
+- [ ] Test single monitor trước
+- [ ] Test thêm case monitor chứa con trỏ trong môi trường multi-monitor
+- [ ] Test ở DPI scale 100% và ít nhất một mức >100%
 
-- [ ] Pre-load model khi khởi động app (tránh delay lần đầu)
-- [ ] Cấu hình PaddleOCR với GPU:
+Phạm vi Phase 1:
+- Chỉ cần support ổn định cho monitor đang chứa con trỏ hoặc monitor người dùng đang thao tác
+- Full support cho mọi layout multi-monitor không phải điều kiện pass bắt buộc của MVP ban đầu
+
+Rủi ro lớn ở bước này:
+- Qt có thể dùng logical coordinates
+- screenshot dùng physical pixels
+- monitor phụ có thể có tọa độ âm
+
+Deliverable:
+- Vùng người dùng chọn khớp đúng vùng crop OCR trên case single monitor
+- Với multi-monitor, ít nhất case monitor chứa con trỏ hoạt động đúng
+
+### 6.5 Selection overlay
+
+- [ ] Tạo fullscreen transparent overlay
+- [ ] Vẽ nền tối mờ trên screenshot
+- [ ] Kéo chuột để chọn **rectangle**
+- [ ] Hiển thị tọa độ và kích thước vùng chọn theo thời gian thực
+- [ ] `Enter` để xác nhận, `Esc` để hủy
+
+Phạm vi Phase 1:
+- Chỉ cần rectangle
+- Chưa cần quadrilateral
+- Chưa cần preview preprocessing realtime
+
+Deliverable:
+- Người dùng nhìn thấy screenshot nền và chọn được vùng ổn định
+
+### 6.6 OCR engine
+
+- [ ] Preload PaddleOCR khi app khởi động
+- [ ] Ưu tiên GPU nếu khả dụng
+- [ ] Nếu GPU init fail thì fallback CPU và log rõ lý do
+- [ ] Nhận ảnh crop và trả ra text + confidence
+- [ ] Lọc kết quả theo confidence threshold ban đầu, ví dụ `>= 0.7`
+
+Ví dụ cấu hình khởi đầu:
 
 ```python
 from paddleocr import PaddleOCR
@@ -120,225 +242,276 @@ ocr = PaddleOCR(
     det_db_thresh=0.3,
     det_db_box_thresh=0.5,
     rec_batch_num=6,
-    enable_mkldnn=False   # Tắt khi dùng GPU
+    enable_mkldnn=False,
 )
 ```
 
-- [ ] Crop ảnh theo vùng đã chọn
-- [ ] Chạy OCR, trả về list `(text, confidence)`
-- [ ] Filter kết quả theo confidence threshold (>= 0.7)
+Ghi chú:
+- Đây là cấu hình khởi điểm để benchmark, không phải cấu hình chốt cuối.
+- Nếu dùng CPU fallback, có thể cần config riêng để tránh kỳ vọng hiệu năng sai.
 
-### 1.6 Result Display (Text gốc)
+Deliverable:
+- OCR trả được text từ ảnh crop thật trong app
 
-- [ ] Tạo PyQt6 overlay đơn giản hiển thị text OCR
-- [ ] Vị trí: ngay bên dưới vùng đã chọn
-- [ ] Style: nền tối bán trong suốt, chữ trắng, bo góc
-- [ ] Flags: `FramelessWindowHint | WindowStaysOnTopHint | WA_TransparentForMouseEvents`
-- [ ] Auto-dismiss sau 10 giây hoặc nhấn `Esc`
+### 6.7 Result overlay
+
+- [ ] Hiển thị text OCR bằng PyQt6 overlay nổi
+- [ ] Mặc định đặt gần vùng đã chọn nhưng không che lên vùng gốc nếu có thể
+- [ ] Nếu sát mép màn hình thì tự reposition
+- [ ] Style tối giản: nền tối bán trong suốt, chữ sáng, dễ đọc
+- [ ] Phase 1 mặc định giữ overlay tới khi người dùng nhấn `Esc` hoặc bắt đầu lần capture kế tiếp
+
+Deliverable:
+- Sau khi OCR xong, text gốc hiển thị ổn định bằng overlay
+- Hành vi đóng overlay đơn giản, dễ đoán, không phụ thuộc timeout sớm
+
+### 6.8 Verification cho Phase 1
+
+Chuẩn bị bộ ảnh mẫu nhỏ để kiểm tra ngay từ đầu:
+
+- [ ] Text UI rõ nét nền đơn giản
+- [ ] Text game có outline trắng
+- [ ] Text nhỏ
+- [ ] Text trên nền phức tạp vừa phải
+- [ ] Ảnh chụp từ app thực tế hoặc game nhẹ
+
+Tiêu chí hoàn thành Phase 1:
+
+- Bấm hotkey mở được selection overlay
+- Chọn vùng xong OCR chạy được trên ảnh thật
+- Overlay hiện được text gốc
+- App không crash nếu OCR fail hoặc GPU không dùng được
+- Vùng crop khớp vùng chọn ở các case DPI đã test
 
 ### ✅ Deliverable Phase 1
-Bấm hotkey → kéo chọn vùng → thấy text OCR hiển thị overlay. Chưa có dịch thuật.
+
+Có bản OCR MVP dùng được để validate pipeline end-to-end trên Windows. Chưa có translation.
 
 ---
 
-## 🎯 Phase 2 — Accuracy & UX (Tuần 3–4)
+## 7. Phase 2 — Accuracy + UX tối thiểu
 
-> **Mục tiêu:** OCR chính xác hơn với game text, UX mượt hơn
+> **Mục tiêu:** Tăng độ chính xác OCR và cải thiện UX vừa đủ để dùng thường xuyên hơn
 
-### 2.1 Preprocessing Pipeline (OpenCV)
+### 7.1 Preprocessing pipeline
 
-- [ ] **Upscale** ảnh nếu chiều cao text < 64px (scale 2x–4x)
-- [ ] **CLAHE** — tăng contrast cục bộ (tốt hơn global)
-- [ ] **Bilateral filter** — giảm noise, giữ edge
-- [ ] **Adaptive threshold** — xử lý background phức tạp
-- [ ] Test với các loại game font: pixel font, outline text, gradient background
+Không nên mặc định bật mọi filter cho mọi ảnh. Nên đi theo hướng preset hoặc strategy.
+
+- [ ] Tạo baseline: ảnh gốc hoặc grayscale nhẹ
+- [ ] Tạo preset cho text nhỏ: upscale trước OCR
+- [ ] Tạo preset cho outlined text: contrast + threshold phù hợp
+- [ ] So sánh kết quả theo confidence hoặc sample accuracy
+- [ ] Chỉ giữ các bước thật sự giúp tăng chất lượng
+
+Ví dụ pipeline thử nghiệm:
 
 ```python
 def preprocess_game_text(img):
     h, w = img.shape[:2]
     if h < 64:
         scale = max(2, 64 // h)
-        img = cv2.resize(img, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC)
+        img = cv2.resize(img, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     denoised = cv2.bilateralFilter(enhanced, 9, 75, 75)
     binary = cv2.adaptiveThreshold(
-        denoised, 255,
+        denoised,
+        255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 11, 2
+        cv2.THRESH_BINARY,
+        11,
+        2,
     )
     return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 ```
 
-### 2.2 Quadrilateral Selection
+### 7.2 White outline / inverted text handling
 
-- [ ] Thêm mode chọn tứ giác (4 điểm click)
-- [ ] Toggle giữa rectangle và quadrilateral mode (phím `Q`)
-- [ ] Perspective transform trước khi OCR:
+- [ ] Thử OCR trên ảnh gốc và ảnh invert
+- [ ] So sánh confidence hoặc chất lượng thực tế
+- [ ] Tạo mode đơn giản: `auto`, `normal`, `inverted`
 
-```python
-def four_point_transform(image, pts):
-    # Dùng cv2.getPerspectiveTransform + cv2.warpPerspective
-    ...
-```
+### 7.3 UX cải thiện tối thiểu
 
-### 2.3 White Outline Text (phổ biến trong game)
+- [ ] Crosshair cursor khi chọn vùng
+- [ ] Copy text OCR vào clipboard tự động hoặc bằng shortcut đơn giản
+- [ ] Tinh chỉnh vị trí result overlay cho dễ đọc
+- [ ] Indicator đơn giản cho confidence nếu thực sự hữu ích
 
-- [ ] Thử OCR cả ảnh gốc lẫn ảnh invert
-- [ ] So sánh confidence score, lấy kết quả cao hơn
-- [ ] Thêm option cho user chọn mode: Auto / Normal / Inverted
+### 7.4 Kiểm chứng lại độ chính xác
 
-### 2.4 UX Improvements
+- [ ] So sánh kết quả giữa ảnh gốc và ảnh preprocess
+- [ ] Test thêm với vài kiểu font game phổ biến
+- [ ] Ghi lại preset nào hợp với từng nhóm ảnh
+- [ ] Dùng bộ ảnh mẫu ít nhất 10 ảnh để so baseline với từng preset chính
 
-- [ ] Thêm crosshair cursor khi đang chọn vùng
-- [ ] Hiển thị preview preprocessing real-time (toggle bằng phím `P`)
-- [ ] Confidence indicator: màu xanh/vàng/đỏ theo độ chính xác
-- [ ] Copy text OCR vào clipboard tự động
-- [ ] Lịch sử OCR (lưu 10 lần gần nhất, xem lại bằng tray icon)
+Tiêu chí hoàn thành Phase 2:
 
-### 2.5 System Tray
+- Dùng rubric `usable / partially usable / unusable` để chấm cùng một bộ ảnh mẫu ít nhất 10 ảnh
+- Số ảnh đạt mức `usable` phải tăng so với baseline
+- Tổng số ảnh đạt `usable + partially usable` nên đạt ít nhất 8/10 trước khi coi preset hiện tại là đủ tốt để dùng tiếp
+- UX đủ mượt để dùng lặp lại nhiều lần trên flow cơ bản: chọn vùng, xem kết quả, capture lại
+- Không thêm complexity lớn ngoài phạm vi OCR-first
 
-- [ ] Chạy app ẩn dưới system tray
-- [ ] Menu: Enable/Disable, History, Settings, Exit
-- [ ] Hiển thị icon khác nhau khi đang OCR (loading state)
+Không cần tối ưu theo độ chính xác tuyệt đối ở Phase 2. Mục tiêu là cải thiện đáng đo trên sample set thực tế bằng cùng một rubric.
 
 ### ✅ Deliverable Phase 2
-OCR hoạt động tốt với game text, có preprocessing tự động, UX gọn gàng với system tray.
+
+OCR đủ ổn định cho nhiều trường hợp text game/app phổ biến, UX gọn hơn nhưng vẫn tập trung vào lõi.
 
 ---
 
-## 🌐 Phase 3 — Translation (Tuần 5–6)
+## 8. Phase 3 — Translation
 
-> **Mục tiêu:** Tích hợp dịch EN → VI
+> **Mục tiêu:** Thêm dịch sau khi OCR đã đủ ổn định
 
-### 3.1 Đánh giá Translation Options
+### 8.1 Nguyên tắc
 
-| Option | Free | Chất lượng | Offline | Ghi chú |
-|---|---|---|---|---|
-| **DeepL Free API** | ✅ 500k ký tự/tháng | ⭐⭐⭐⭐⭐ | ❌ | **Khuyến nghị** |
-| Google Translate API | ❌ (có free tier nhỏ) | ⭐⭐⭐⭐ | ❌ | Cần billing |
-| `googletrans` (unofficial) | ✅ | ⭐⭐⭐ | ❌ | Không ổn định |
-| LibreTranslate (local) | ✅ | ⭐⭐⭐ | ✅ | Self-host, nặng |
-| OPUS-MT (local model) | ✅ | ⭐⭐⭐ | ✅ | ~300MB model |
+Translation không được làm rối hoặc làm chậm việc xác thực OCR core. Chỉ bắt đầu phase này khi:
 
-### 3.2 Tích hợp DeepL (Khuyến nghị)
+- OCR pipeline đã ổn định
+- Crop và coordinate mapping đã đáng tin cậy
+- Có bộ ảnh mẫu chứng minh OCR đủ tốt để dịch có ý nghĩa
 
-- [ ] Đăng ký DeepL Free API key
-- [ ] Cài `deepl` package
-- [ ] Implement async translation (không block OCR pipeline)
-- [ ] Cache kết quả dịch cho text trùng lặp
-- [ ] Fallback sang googletrans nếu DeepL hết quota
+### 8.2 Hướng triển khai translation
 
-### 3.3 Result Overlay — Translation View
+Translation chỉ nên bắt đầu sau khi OCR core đã được chứng minh đủ ổn định trên sample set thực tế.
 
-- [ ] Layout 2 phần: text gốc (xám nhạt) + bản dịch (trắng, to hơn)
-- [ ] Nút copy riêng cho từng phần
-- [ ] Loading spinner trong lúc đợi API
-- [ ] Hiển thị nguồn dịch (DeepL / Google / etc.)
+- [ ] Chọn một provider chính sau khi đánh giá nhu cầu chất lượng, chi phí, và độ ổn định
+- [ ] Gọi translation bất đồng bộ, không block UI
+- [ ] Giữ thiết kế phần dịch tách rời khỏi OCR core để dễ bật/tắt
+- [ ] Nếu provider lỗi hoặc hết quota thì báo mềm, không crash app
 
-### 3.4 Settings Panel
+### 8.3 Result overlay song ngữ
 
-- [ ] Ngôn ngữ nguồn: Auto-detect / English / Japanese / Chinese / Korean
-- [ ] Ngôn ngữ đích: Vietnamese (mặc định)
-- [ ] API key management (DeepL, Google)
-- [ ] OCR confidence threshold
-- [ ] Auto-dismiss delay
+- [ ] Hiển thị text gốc và bản dịch tách rõ
+- [ ] Có trạng thái loading trong lúc chờ dịch
+- [ ] Chỉ thêm thao tác copy/phím tắt nếu thật sự cần sau khi flow OCR đã ổn
+
+Tiêu chí hoàn thành Phase 3:
+
+- OCR → translation → overlay song ngữ chạy được
+- Translation không làm hỏng trải nghiệm OCR đã có
+- Quyết định provider dựa trên kết quả thử nghiệm thật, không chốt từ roadmap này
 
 ### ✅ Deliverable Phase 3
-Pipeline hoàn chỉnh: Hotkey → Chọn vùng → OCR → Dịch → Overlay song ngữ.
+
+Pipeline hoàn chỉnh: hotkey → chọn vùng → OCR → dịch → overlay song ngữ.
+
+Translation vẫn là phase phụ thuộc vào chất lượng OCR. Nếu OCR chưa đủ ổn, không nên đẩy nhanh phase này.
 
 ---
 
-## 📦 Phase 4 — Polish & Packaging (Tuần 7–8)
+## 9. Phase 4 — Polish + Packaging
 
-> **Mục tiêu:** App sẵn sàng dùng hàng ngày, có thể share
+> **Mục tiêu:** Tối ưu để dùng hàng ngày và có thể chia sẻ
 
-### 4.1 Performance Optimization
+### 9.1 Performance optimization
 
-- [ ] Profile pipeline, tìm bottleneck
-- [ ] Model warm-up khi startup (giảm cold start)
-- [ ] Async/threading: OCR và Translation chạy song song nếu có thể
-- [ ] Target: < 200ms từ lúc confirm selection đến hiện kết quả OCR
+- [ ] Warm-up OCR khi startup
+- [ ] Đo bottleneck từng bước
+- [ ] Tối ưu preprocess nếu quá nặng
+- [ ] Xem xét threading hoặc task queue nếu cần
 
-### 4.2 Error Handling & Robustness
+Performance nên đo sau khi đã có baseline thật trên phần cứng mục tiêu.
 
-- [ ] Xử lý trường hợp OCR không detect được text
-- [ ] Timeout cho Translation API
-- [ ] Log lỗi ra file (không crash app)
-- [ ] Graceful degradation: nếu GPU không dùng được → fallback CPU
+Baseline cần tách ít nhất:
+- GPU path
+- CPU fallback path
+- Ảnh dễ đọc
+- Ảnh khó hơn hoặc text nhỏ
 
-### 4.3 Packaging với PyInstaller
+Budget dưới đây chỉ là mốc tham chiếu để quan sát bottleneck, không phải cam kết cứng ngay từ đầu:
+
+| Bước | Mốc tham chiếu ban đầu |
+|---|---|
+| Screenshot | khoảng `< 15ms` |
+| Crop + mapping | khoảng `< 10ms` |
+| Preprocess | khoảng `< 30ms` |
+| OCR | phụ thuộc mạnh vào GPU/CPU và loại ảnh |
+| Overlay render | khoảng `< 20ms` |
+
+Mục tiêu giai đoạn đầu:
+- đo được latency end-to-end trên máy mục tiêu
+- tách rõ số liệu GPU và CPU fallback
+- chỉ đặt hard target sau khi đã có baseline thực tế
+
+Nếu GPU path đủ ổn, có thể dùng mốc `< 200ms` end-to-end như target tối ưu về sau, không coi là điều kiện pass sớm cho toàn roadmap.
+
+### 9.2 Robustness
+
+- [ ] Xử lý case không detect được text
+- [ ] Log lỗi đủ để debug
+- [ ] Không crash khi API dịch lỗi
+- [ ] Kiểm tra fallback CPU hoạt động khi đóng gói
+
+### 9.3 Packaging
+
+- [ ] Build bằng PyInstaller
+- [ ] Bundle model/dependency cần thiết
+- [ ] Test trên máy không có Python dev environment
+- [ ] Kiểm tra app khởi động không cần quyền admin nếu có thể
+
+Ví dụ lệnh build sau này:
 
 ```bash
 pyinstaller --onefile --windowed \
-  --add-data "models;models" \
   --icon=icon.ico \
   main.py
 ```
 
-- [ ] Bundle PaddleOCR models vào package
-- [ ] Test .exe trên máy không có Python
-- [ ] Cài đặt không cần quyền admin
-- [ ] Auto-start với Windows (tùy chọn)
+### 9.4 Optional features sau khi lõi ổn
 
-### 4.4 Configuration File
-
-```toml
-# config.toml
-[ocr]
-lang = "en"
-use_gpu = true
-confidence_threshold = 0.7
-preprocess = "auto"   # auto | normal | inverted | pixel_font
-
-[translation]
-provider = "deepl"    # deepl | google | local
-target_lang = "vi"
-cache_size = 100
-
-[ui]
-overlay_opacity = 0.85
-auto_dismiss_seconds = 10
-font_size = 14
-```
-
-### 4.5 Testing
-
-- [ ] Unit test preprocessing pipeline với nhiều loại game screenshot
-- [ ] Test hotkey conflict detection
-- [ ] Test với các resolution: 1080p, 1440p, 4K
-- [ ] Test với các game phổ biến: RPG, visual novel, strategy
+- [ ] System tray
+- [ ] History
+- [ ] Settings panel
+- [ ] Auto-start cùng Windows
+- [ ] Quadrilateral selection nếu thật sự cần cho text nghiêng
 
 ### ✅ Deliverable Phase 4
-File `.exe` hoàn chỉnh, cài được, dùng được hàng ngày.
+
+Bản app đủ ổn định để dùng hàng ngày, có thể build và chia sẻ.
 
 ---
 
-## 🗂️ Cấu trúc thư mục đề xuất
+## 10. Rủi ro kỹ thuật cần theo dõi sớm
 
-```
+| Rủi ro | Mức độ | Ghi chú |
+|---|---|---|
+| DPI scaling làm lệch vùng chọn và vùng crop | Cao | Rủi ro quan trọng ở Windows multi-monitor |
+| PaddleOCR GPU init fail hoặc driver/CUDA mismatch | Cao | Phải có CPU fallback sớm |
+| `pynput` không bắt được hotkey ở vài game fullscreen exclusive | Cao | Không nên coi là bug blocker cho MVP app thường |
+| Text quá nhỏ hoặc quá nhiễu | Cao | Cần preset preprocess và sample-based validation |
+| Overlay che mất vùng text gốc | Vừa | Cần reposition logic |
+| Translation rate limit / quota | Vừa | Chỉ xuất hiện ở phase sau |
+| Anti-cheat hoặc game policy không thích overlay/capture | Vừa | Nên test kỹ với app thường trước, game sau |
+
+---
+
+## 11. Cấu trúc thư mục đề xuất
+
+### 11.1 Cấu trúc tối thiểu cho MVP OCR-first
+
+```text
 ocr-overlay/
-├── main.py                  # Entry point, app lifecycle
-├── config.toml              # User configuration
+├── main.py
 ├── requirements.txt
 │
 ├── core/
-│   ├── hotkey.py            # Global hotkey listener
-│   ├── screenshot.py        # mss wrapper
-│   ├── preprocessor.py      # OpenCV pipeline
-│   ├── ocr_engine.py        # PaddleOCR wrapper
-│   └── translator.py        # Translation API wrapper
+│   ├── app_controller.py
+│   ├── hotkey.py
+│   ├── screenshot.py
+│   ├── coordinate_mapper.py
+│   ├── preprocessor.py
+│   └── ocr_engine.py
 │
 ├── ui/
-│   ├── selection_overlay.py # Vẽ vùng chọn
-│   ├── result_overlay.py    # Hiển thị kết quả
-│   ├── tray_icon.py         # System tray
-│   └── settings_dialog.py  # Settings UI
+│   ├── selection_overlay.py
+│   └── result_overlay.py
 │
 ├── utils/
-│   ├── clipboard.py
-│   ├── history.py
 │   └── logger.py
 │
 └── assets/
@@ -346,47 +519,57 @@ ocr-overlay/
     └── icon.png
 ```
 
----
+### 11.2 Module có thể thêm ở phase sau
 
-## ⚡ Quick Start (bắt đầu ngay)
-
-```bash
-# 1. Tạo project
-mkdir ocr-overlay && cd ocr-overlay
-python -m venv venv
-venv\Scripts\activate
-
-# 2. Cài CUDA dependencies (làm trước tiên)
-# Download CUDA 12.x tại: https://developer.nvidia.com/cuda-downloads
-# Download cuDNN tại: https://developer.nvidia.com/cudnn
-
-# 3. Cài Python packages
-pip install paddlepaddle-gpu paddleocr PyQt6 mss opencv-python pynput Pillow
-
-# 4. Verify GPU hoạt động
-python -c "import paddle; print(paddle.device.get_device())"
-# Kỳ vọng output: gpu:0
-
-# 5. Test PaddleOCR load
-python -c "
-from paddleocr import PaddleOCR
-ocr = PaddleOCR(use_gpu=True, lang='en')
-print('PaddleOCR loaded OK')
-"
+```text
+ocr-overlay/
+├── config.toml
+├── core/
+│   └── translator.py
+├── ui/
+│   ├── tray_icon.py
+│   └── settings_dialog.py
+└── utils/
+    ├── clipboard.py
+    └── history.py
 ```
 
----
-
-## ⚠️ Rủi ro & lưu ý
-
-| Rủi ro | Khả năng | Giải pháp |
-|---|---|---|
-| RTX 5060 Ti driver chưa tương thích CUDA 12.x | Trung bình | Thử CUDA 11.8, hoặc dùng EasyOCR thay thế |
-| PaddleOCR cold start chậm (~3s) | Chắc chắn | Pre-load khi app khởi động |
-| Game fullscreen exclusive → hotkey không bắt được | Có thể | Dùng `keyboard` thay `pynput`, hoặc DirectX hook |
-| Text quá nhỏ (<12px) → OCR kém | Có thể | Upscale 4x + pixel font mode |
-| API dịch thuật rate limit | Thấp | Implement cache + fallback |
+Ghi chú:
+- Chỉ scaffold module khi phase tương ứng thực sự bắt đầu.
+- `coordinate_mapper.py` đáng tách riêng vì đây là chỗ dễ phát sinh lỗi khó debug.
+- `clipboard.py` có thể đưa sớm hơn nếu Phase 2 xác nhận đây là UX cải thiện thật sự cần thiết.
 
 ---
 
-*Roadmap thiết kế theo hướng incremental — mỗi phase đều có deliverable chạy được. Bắt đầu từ Phase 1 MVP để validate toàn bộ pipeline sớm nhất có thể.*
+## 12. Quick start định hướng
+
+```bash
+python -m venv venv
+source venv/Scripts/activate
+pip install paddleocr PyQt6 mss opencv-python pynput Pillow
+```
+
+Kiểm tra tối thiểu:
+
+```bash
+python -c "from paddleocr import PaddleOCR; print('PaddleOCR import OK')"
+```
+
+Nếu muốn thử GPU, nên kiểm tra riêng theo môi trường thực tế thay vì giả định roadmap nào cũng giống nhau.
+
+---
+
+## 13. Success criteria tổng thể
+
+| Phase | Done khi nào |
+|---|---|
+| **Phase 1** | Có OCR MVP chạy end-to-end trên ảnh thật |
+| **Phase 2** | OCR chính xác hơn rõ rệt, UX đủ dùng lặp lại |
+| **Phase 3** | Có dịch mà không phá trải nghiệm OCR |
+| **Phase 4** | App đủ ổn định để dùng hàng ngày và đóng gói |
+
+---
+
+## 14. Kết luận
+
+Roadmap này ưu tiên một việc trước: chứng minh pipeline OCR local trên Windows hoạt động ổn định trong thực tế. Khi lõi đã đúng và đủ nhanh, translation và phần polish mới đáng đầu tư tiếp.
