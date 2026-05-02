@@ -39,7 +39,7 @@ class AppController:
     def __init__(self, logger: logging.Logger, deps: AppControllerDependencies | None = None) -> None:
         self._logger = logger
         self._deps = deps or AppControllerDependencies(
-            hotkey=HotkeyManager(),
+            hotkey=HotkeyManager(logger=logger, on_hotkey=self.handle_hotkey),
             screenshot=ScreenshotService(),
             coordinate_mapper=CoordinateMapper(),
             preprocessor=ImagePreprocessor(),
@@ -56,6 +56,9 @@ class AppController:
     def stop(self) -> None:
         self._logger.info("Controller stop")
         self._deps.hotkey.stop()
+
+    def handle_hotkey(self) -> None:
+        self._logger.info("Global hotkey pressed in state=%s", self.state)
 
     def transition_to(self, new_state: str) -> None:
         if new_state not in _ALLOWED_STATES:
