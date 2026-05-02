@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 OCR_CONFIDENCE_THRESHOLD = 0.70
+TEXT_DET_LIMIT_SIDE_LEN = 960
+TEXT_DET_LIMIT_TYPE = "max"
+TEXT_DET_THRESH = 0.3
+TEXT_DET_BOX_THRESH = 0.6
+TEXT_DET_UNCLIP_RATIO = 2.0
+TEXT_REC_SCORE_THRESH = 0.0
 
 
 @dataclass(frozen=True)
@@ -32,42 +38,33 @@ class OCREngine:
             return
 
         self._logger.info("OCR confidence threshold=%.2f", OCR_CONFIDENCE_THRESHOLD)
-        try:
-            self._ocr = self._create_engine(use_gpu=True)
-            self._runtime = "gpu"
-            self._logger.info("OCR runtime initialized with GPU")
-            return
-        except Exception:
-            self._logger.exception("GPU OCR initialization failed")
-
         self._ocr = self._create_engine(use_gpu=False)
         self._runtime = "cpu"
-        self._logger.info("OCR runtime initialized with CPU fallback")
+        self._logger.info("OCR runtime initialized with CPU")
 
     def recognize(self, image: Any) -> OCRResult:
         self.preload()
 
         try:
-            raw_result = self._ocr.ocr(image)
+            raw_result = self._predict(image)
         except Exception:
-            if self._runtime != "gpu":
-                self._logger.exception("OCR execution failed")
-                return OCRResult(lines=[], display_text="", average_confidence=0.0, status="error")
-
-            self._logger.exception("GPU OCR execution failed")
-            self._ocr = self._create_engine(use_gpu=False)
-            self._runtime = "cpu"
-            self._logger.info("OCR runtime switched to CPU fallback")
-
-            try:
-                raw_result = self._ocr.ocr(image)
-            except Exception:
-                self._logger.exception("CPU OCR execution failed")
-                return OCRResult(lines=[], display_text="", average_confidence=0.0, status="error")
+            self._logger.exception("OCR execution failed")
+            return OCRResult(lines=[], display_text="", average_confidence=0.0, status="error")
 
         result = self._normalize_result(raw_result)
         self._logger.info("OCR result status=%s runtime=%s lines=%s", result.status, self._runtime, len(result.lines))
         return result
+
+    def _predict(self, image: Any) -> Any:
+        return self._ocr.predict(
+            image,
+            text_det_limit_side_len=TEXT_DET_LIMIT_SIDE_LEN,
+            text_det_limit_type=TEXT_DET_LIMIT_TYPE,
+            text_det_thresh=TEXT_DET_THRESH,
+            text_det_box_thresh=TEXT_DET_BOX_THRESH,
+            text_det_unclip_ratio=TEXT_DET_UNCLIP_RATIO,
+            text_rec_score_thresh=TEXT_REC_SCORE_THRESH,
+        )
 
     @property
     def runtime(self) -> str:
@@ -77,29 +74,37 @@ class OCREngine:
         from paddleocr import PaddleOCR
 
         device = "gpu:0" if use_gpu else "cpu"
-        return PaddleOCR(
-            lang="en",
-            device=device,
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-        )
+        kwargs: dict[str, Any] = {
+            "lang": "en",
+            "device": device,
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+        }
+        if not use_gpu:
+            kwargs["enable_mkldnn"] = False
+            kwargs["cpu_threads"] = 1
+
+        return PaddleOCR(**kwargs)
 
     def _normalize_result(self, raw_result: Any) -> OCRResult:
         lines: list[OCRLine] = []
+        fallback_lines: list[OCRLine] = []
 
         for page_result in raw_result or []:
+            if isinstance(page_result, dict):
+                texts = page_result.get("rec_texts", []) or []
+                scores = page_result.get("rec_scores", []) or []
+                for text, confidence in zip(texts, scores):
+                    self._collect_line(lines, fallback_lines, text, confidence)
+                continue
+
             page_json = getattr(page_result, "json", None)
             if isinstance(page_json, dict):
                 texts = page_json.get("rec_texts", []) or []
                 scores = page_json.get("rec_scores", []) or []
                 for text, confidence in zip(texts, scores):
-                    normalized_text = str(text).strip()
-                    normalized_confidence = float(confidence)
-                    if not normalized_text or normalized_confidence < OCR_CONFIDENCE_THRESHOLD:
-                        continue
-
-                    lines.append(OCRLine(text=normalized_text, confidence=normalized_confidence))
+                    self._collect_line(lines, fallback_lines, text, confidence)
                 continue
 
             legacy_items = page_result or []
@@ -109,12 +114,7 @@ class OCREngine:
                         continue
 
                     text, confidence = item[1]
-                    normalized_text = str(text).strip()
-                    normalized_confidence = float(confidence)
-                    if not normalized_text or normalized_confidence < OCR_CONFIDENCE_THRESHOLD:
-                        continue
-
-                    lines.append(OCRLine(text=normalized_text, confidence=normalized_confidence))
+                    self._collect_line(lines, fallback_lines, text, confidence)
                 continue
 
             for block in page_result or []:
@@ -123,12 +123,11 @@ class OCREngine:
                         continue
 
                     text, confidence = item[1]
-                    normalized_text = str(text).strip()
-                    normalized_confidence = float(confidence)
-                    if not normalized_text or normalized_confidence < OCR_CONFIDENCE_THRESHOLD:
-                        continue
+                    self._collect_line(lines, fallback_lines, text, confidence)
 
-                    lines.append(OCRLine(text=normalized_text, confidence=normalized_confidence))
+        if not lines and fallback_lines:
+            best_line = max(fallback_lines, key=lambda line: line.confidence)
+            lines = [best_line]
 
         if not lines:
             return OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
@@ -141,3 +140,18 @@ class OCREngine:
             average_confidence=average_confidence,
             status="ok",
         )
+
+    @staticmethod
+    def _collect_line(lines: list[OCRLine], fallback_lines: list[OCRLine], text: Any, confidence: Any) -> None:
+        normalized_text = str(text).strip()
+        normalized_confidence = float(confidence)
+        if not normalized_text:
+            return
+
+        line = OCRLine(text=normalized_text, confidence=normalized_confidence)
+        if normalized_confidence >= OCR_CONFIDENCE_THRESHOLD:
+            lines.append(line)
+            return
+
+        if normalized_confidence >= 0.5 and any(char.isalnum() for char in normalized_text) and len(normalized_text) >= 4:
+            fallback_lines.append(line)

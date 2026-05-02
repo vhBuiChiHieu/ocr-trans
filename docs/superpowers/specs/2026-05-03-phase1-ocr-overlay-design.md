@@ -47,7 +47,7 @@ This choice reduces ambiguity around Windows focus behavior and keeps Phase 1 al
 - Rectangle-only selection
 - Crop and coordinate mapping for selected region
 - Local OCR using PaddleOCR
-- GPU-preferred runtime with CPU fallback
+- CPU-only runtime for stable local execution
 - Result overlay showing detected source text
 - Basic logging
 - Manual end-to-end verification on real screenshots
@@ -99,7 +99,7 @@ utils/
 | `core/screenshot.py` | Capture screenshot for target monitor and return image plus monitor metadata |
 | `core/coordinate_mapper.py` | Convert selection rectangle from Qt coordinate space to screenshot pixel space |
 | `core/preprocessor.py` | Keep preprocessing minimal in Phase 1; pass-through or light grayscale path only |
-| `core/ocr_engine.py` | Preload PaddleOCR, execute OCR, normalize output, handle GPU/CPU runtime path |
+| `core/ocr_engine.py` | Preload PaddleOCR, execute OCR on CPU, normalize output, keep runtime behavior stable |
 | `ui/selection_overlay.py` | Render screenshot-backed overlay and collect rectangle selection or cancel action |
 | `ui/result_overlay.py` | Render OCR result text near selected region and close on explicit user action |
 | `utils/logger.py` | Emit basic logs useful for debugging capture/OCR/runtime failures |
@@ -295,9 +295,8 @@ A normalized OCR result structure containing at least:
 ## OCR runtime behavior
 
 - preload PaddleOCR during app startup to reduce cold-start delay
-- prefer GPU runtime when available
-- if GPU path fails at initialization or execution, fall back to CPU path inside OCR module
-- log which runtime path is active
+- use CPU runtime as the only supported runtime in Phase 1
+- log that CPU runtime is active
 - filter low-confidence results by the single threshold owned by `core/ocr_engine.py`
 - if no text survives filtering, return `no_text`
 
@@ -344,7 +343,7 @@ Phase 1 uses soft-fail behavior.
 ### Required outcomes
 
 - OCR failure must not crash app
-- GPU path failure must not crash app
+- CPU runtime failure must not crash app
 - cancelled selection must cleanly return app to `idle`
 - empty OCR result must still complete flow with explicit user-visible outcome
 
@@ -499,9 +498,8 @@ A normalized OCR result structure containing at least:
 ## OCR runtime behavior
 
 - preload PaddleOCR during app startup to reduce cold-start delay
-- prefer GPU runtime when available
-- if GPU path fails at initialization or execution, fall back to CPU path inside OCR module
-- log which runtime path is active
+- use CPU runtime as the only supported runtime in Phase 1
+- log that CPU runtime is active
 - filter low-confidence results by the single threshold owned by `core/ocr_engine.py`
 - if no text survives filtering, return `no_text`
 
@@ -548,7 +546,7 @@ Phase 1 uses soft-fail behavior.
 ### Required outcomes
 
 - OCR failure must not crash app
-- GPU path failure must not crash app
+- CPU runtime failure must not crash app
 - cancelled selection must cleanly return app to `idle`
 - empty OCR result must still complete flow with explicit user-visible outcome
 
@@ -598,7 +596,7 @@ Phase 1 is complete when all conditions below are true:
 - OCR runs on real captured image region
 - result overlay shows extracted text or explicit no-text result
 - app returns cleanly to `idle` on cancel, failure, dismiss, and next-capture flow
-- GPU-preferred path works when available, and CPU fallback path is structurally supported
+- CPU-only runtime works reliably on real sample images and remains structurally stable in app flow
 
 ## Deferred work
 

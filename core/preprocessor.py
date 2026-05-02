@@ -10,6 +10,18 @@ class ImagePreprocessor:
             return rgb.reshape((image.height, image.width, 3)).copy()
 
         if isinstance(image, np.ndarray):
-            return image.copy()
+            return self._normalize_array(image)
 
-        return np.array(image)
+        if hasattr(image, "convert"):
+            return self._normalize_array(np.array(image.convert("RGB"), dtype=np.uint8))
+
+        return self._normalize_array(np.array(image, dtype=np.uint8))
+
+    @staticmethod
+    def _normalize_array(image: np.ndarray) -> np.ndarray:
+        if image.ndim == 2:
+            image = np.stack([image] * 3, axis=-1)
+        elif image.ndim == 3 and image.shape[2] == 4:
+            image = image[:, :, :3]
+
+        return np.ascontiguousarray(image, dtype=np.uint8)
