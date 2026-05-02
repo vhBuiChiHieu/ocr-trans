@@ -43,7 +43,7 @@ class AppController:
             screenshot=ScreenshotService(),
             coordinate_mapper=CoordinateMapper(),
             preprocessor=ImagePreprocessor(),
-            ocr_engine=OCREngine(),
+            ocr_engine=OCREngine(logger=logger),
             selection_overlay=SelectionOverlay(),
             result_overlay=ResultOverlay(),
         )
