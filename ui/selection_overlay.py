@@ -22,6 +22,7 @@ class SelectionOverlay(QWidget):
         self._background = QPixmap()
         self._drag_start: QPoint | None = None
         self._drag_current: QPoint | None = None
+        self._click_anchor: QPoint | None = None
         self._selection_rect = QRect()
         self._on_confirm: Callable[[SelectionResult], None] | None = None
         self._on_cancel: Callable[[], None] | None = None
@@ -47,6 +48,7 @@ class SelectionOverlay(QWidget):
         self._background = self._pixmap_from_capture(capture)
         self._drag_start = None
         self._drag_current = None
+        self._click_anchor = None
         self._selection_rect = QRect()
         self._on_confirm = on_confirm
         self._on_cancel = on_cancel
@@ -63,6 +65,7 @@ class SelectionOverlay(QWidget):
         self.hide()
         self._drag_start = None
         self._drag_current = None
+        self._click_anchor = None
         self._selection_rect = QRect()
         self._on_confirm = None
         self._on_cancel = None
@@ -88,25 +91,65 @@ class SelectionOverlay(QWidget):
         point = event.position().toPoint()
         self._drag_start = point
         self._drag_current = point
-        self._selection_rect = QRect(point, point)
+        if self._click_anchor is None:
+            self._selection_rect = QRect()
+        else:
+            self._selection_rect = QRect(self._click_anchor, point).normalized()
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_start is None:
-            super().mouseMoveEvent(event)
+        point = event.position().toPoint()
+
+        if self._drag_start is not None:
+            self._drag_current = point
+            self._selection_rect = QRect(self._drag_start, self._drag_current).normalized()
+            self.update()
             return
 
-        self._drag_current = event.position().toPoint()
-        self._selection_rect = QRect(self._drag_start, self._drag_current).normalized()
-        self.update()
+        if self._click_anchor is not None:
+            self._selection_rect = QRect(self._click_anchor, point).normalized()
+            self.update()
+            return
+
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self._drag_start is None:
             super().mouseReleaseEvent(event)
             return
 
-        self._drag_current = event.position().toPoint()
-        self._selection_rect = QRect(self._drag_start, self._drag_current).normalized()
+        release_point = event.position().toPoint()
+        selection_rect = QRect(self._drag_start, release_point).normalized()
+        moved = (release_point - self._drag_start).manhattanLength() > 3
+        self._drag_start = None
+        self._drag_current = None
+
+        if moved:
+            self._selection_rect = selection_rect
+            self.update()
+            self._confirm_current_selection()
+            return
+
+        if self._click_anchor is None:
+            self._click_anchor = release_point
+            self._selection_rect = QRect()
+            self.update()
+            return
+
+        self._selection_rect = QRect(self._click_anchor, release_point).normalized()
+        self._click_anchor = None
+        self.update()
+        self._confirm_current_selection()
+
+    def _confirm_current_selection(self) -> None:
+        if self._on_confirm is None or self._selection_rect.isNull():
+            return
+
+        self._on_confirm(SelectionResult(rect=QRect(self._selection_rect)))
+        self._click_anchor = None
+        self._drag_start = None
+        self._drag_current = None
+        self._selection_rect = QRect()
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -121,14 +164,7 @@ class SelectionOverlay(QWidget):
         painter.setPen(QPen(QColor(0, 180, 255), 2))
         painter.drawRect(self._selection_rect)
 
-        metrics_text = (
-            f"x={self._selection_rect.x()} y={self._selection_rect.y()} "
-            f"w={self._selection_rect.width()} h={self._selection_rect.height()}"
-        )
-        label_rect = QRect(self._selection_rect.topLeft() + QPoint(8, 8), QPoint(220, 34))
-        painter.fillRect(label_rect, QColor(0, 0, 0, 170))
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(label_rect.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, metrics_text)
+
 
     def _pixmap_from_capture(self, capture: MonitorCapture) -> QPixmap:
         rgb = bytes(capture.image.rgb)
