@@ -107,6 +107,30 @@ class AppController:
             result.rect.width(),
             result.rect.height(),
         )
+
+        if self._active_capture is None:
+            self._logger.error("Selection confirmed without active capture")
+            self._deps.selection_overlay.hide_overlay()
+            self.transition_to(STATE_IDLE)
+            return
+
+        crop_rect = self._deps.coordinate_mapper.map_selection_rect(result.rect, self._active_capture)
+        if crop_rect is None:
+            self._logger.info("Selection invalid after coordinate mapping")
+            self._deps.selection_overlay.hide_overlay()
+            self._active_capture = None
+            self.transition_to(STATE_IDLE)
+            return
+
+        self._logger.info(
+            "Mapped crop left=%s top=%s right=%s bottom=%s width=%s height=%s",
+            crop_rect.left,
+            crop_rect.top,
+            crop_rect.right,
+            crop_rect.bottom,
+            crop_rect.width,
+            crop_rect.height,
+        )
         self._deps.selection_overlay.hide_overlay()
         self._active_capture = None
         self.transition_to(STATE_IDLE)
