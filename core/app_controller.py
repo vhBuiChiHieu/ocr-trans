@@ -60,6 +60,14 @@ class AppController:
     def handle_hotkey(self) -> None:
         self._logger.info("Global hotkey pressed in state=%s", self.state)
 
+        try:
+            capture = self._deps.screenshot.capture_cursor_monitor()
+        except Exception:
+            self._logger.exception("Screenshot capture failed")
+            return
+
+        self._deps.screenshot.log_capture_target(self._logger, capture.monitor)
+
     def transition_to(self, new_state: str) -> None:
         if new_state not in _ALLOWED_STATES:
             raise ValueError(f"Invalid state: {new_state}")
