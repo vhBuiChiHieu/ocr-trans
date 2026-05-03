@@ -121,7 +121,7 @@ class OCREngine:
         }
         if not use_gpu:
             kwargs["enable_mkldnn"] = False
-            kwargs["cpu_threads"] = 1
+            kwargs["cpu_threads"] = 4
 
         return PaddleOCR(**kwargs)
 

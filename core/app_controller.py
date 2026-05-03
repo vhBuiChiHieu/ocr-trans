@@ -10,7 +10,7 @@ from core.hotkey import HotkeyManager
 from core.screenshot import MonitorCapture, ScreenshotService
 from core.coordinate_mapper import CoordinateMapper
 from core.preprocessor import ImagePreprocessor, PRESET_BASELINE
-from core.ocr_engine import OCR_MODE_AUTO, OCREngine, OCRResult
+from core.ocr_engine import OCR_MODE_NORMAL, OCREngine, OCRResult
 from core.ocr_pipeline import OCRPipeline, OCRPipelineConfig
 from ui.selection_overlay import SelectionOverlay, SelectionResult
 from ui.result_overlay import ResultOverlay
@@ -61,7 +61,7 @@ class AppController:
                     ocr_engine=ocr_engine,
                     config=OCRPipelineConfig(
                         preset=PRESET_BASELINE,
-                        mode=OCR_MODE_AUTO,
+                        mode=OCR_MODE_NORMAL,
                     ),
                 ),
                 selection_overlay=SelectionOverlay(),

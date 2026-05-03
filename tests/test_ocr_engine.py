@@ -298,7 +298,7 @@ class OCREngineTests(unittest.TestCase):
 
         self.assertEqual(created_kwargs["device"], "cpu")
         self.assertFalse(created_kwargs["enable_mkldnn"])
-        self.assertEqual(created_kwargs["cpu_threads"], 1)
+        self.assertEqual(created_kwargs["cpu_threads"], 4)
 
 
 
