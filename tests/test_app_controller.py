@@ -66,6 +66,10 @@ class FakeOCREngine:
     def __init__(self, result: OCRResult) -> None:
         self.result = result
         self.images: list[np.ndarray] = []
+        self.preload_calls = 0
+
+    def preload(self) -> None:
+        self.preload_calls += 1
 
     def recognize(self, image) -> OCRResult:
         self.images.append(image.copy())
@@ -162,6 +166,19 @@ class AppControllerTests(unittest.TestCase):
         )
         controller = AppController(logger=self.logger, deps=deps)
         return controller, ocr_engine, selection_overlay, result_overlay
+
+    def test_start_warms_ocr_in_background(self) -> None:
+        controller, ocr_engine, _selection_overlay, _result_overlay = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+        thread_patch = patch_thread()
+        try:
+            controller.start()
+        finally:
+            thread_patch.restore()
+
+        self.assertTrue(controller._deps.hotkey.started)
+        self.assertEqual(ocr_engine.preload_calls, 1)
 
     def test_handle_hotkey_starts_selection_flow(self) -> None:
         controller, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(

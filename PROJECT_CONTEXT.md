@@ -1,5 +1,8 @@
 # PROJECT_CONTEXT
 
+# Môi trường
+- môi trường riêng tại .venv/
+
 ## Repo này là gì
 
 Repo này là app OCR local cho Windows.

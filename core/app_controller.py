@@ -64,6 +64,8 @@ class AppController:
         self._logger.info("Controller start")
         self._deps.hotkey.start()
 
+        threading.Thread(target=self._preload_ocr, name="ocr-preload", daemon=True).start()
+
     def stop(self) -> None:
         self._logger.info("Controller stop")
         self._deps.selection_overlay.hide_overlay()
@@ -72,6 +74,12 @@ class AppController:
         self._active_capture = None
         self._active_selection_rect = QRect()
         self.transition_to(STATE_IDLE)
+
+    def _preload_ocr(self) -> None:
+        try:
+            self._deps.ocr_engine.preload()
+        except Exception:
+            self._logger.exception("OCR preload failed")
 
     def handle_hotkey(self) -> None:
         self._logger.info("Global hotkey pressed in state=%s", self.state)
