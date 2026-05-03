@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 OCR_CONFIDENCE_THRESHOLD = 0.70
 TEXT_DET_LIMIT_SIDE_LEN = 960
 TEXT_DET_LIMIT_TYPE = "max"
@@ -11,6 +13,10 @@ TEXT_DET_THRESH = 0.3
 TEXT_DET_BOX_THRESH = 0.6
 TEXT_DET_UNCLIP_RATIO = 2.0
 TEXT_REC_SCORE_THRESH = 0.0
+OCR_MODE_NORMAL = "normal"
+OCR_MODE_INVERTED = "inverted"
+OCR_MODE_AUTO = "auto"
+OCR_MODES = (OCR_MODE_NORMAL, OCR_MODE_INVERTED, OCR_MODE_AUTO)
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,12 @@ class OCRResult:
     display_text: str
     average_confidence: float
     status: str
+
+
+@dataclass(frozen=True)
+class OCRCandidate:
+    mode: str
+    result: OCRResult
 
 
 class OCREngine:
@@ -42,18 +54,44 @@ class OCREngine:
         self._runtime = "cpu"
         self._logger.info("OCR runtime initialized with CPU")
 
-    def recognize(self, image: Any) -> OCRResult:
+    def recognize(self, image: Any, mode: str = OCR_MODE_NORMAL) -> OCRResult:
         self.preload()
 
+        if mode == OCR_MODE_NORMAL:
+            result = self._recognize_single(image)
+        elif mode == OCR_MODE_INVERTED:
+            result = self._recognize_single(self._invert_image(image))
+        elif mode == OCR_MODE_AUTO:
+            result = self._recognize_auto(image)
+        else:
+            raise ValueError(f"Unsupported OCR mode: {mode}")
+
+        self._logger.info("OCR result status=%s runtime=%s lines=%s mode=%s", result.status, self._runtime, len(result.lines), mode)
+        return result
+
+    def _recognize_auto(self, image: Any) -> OCRResult:
+        candidates: list[OCRCandidate] = []
+        normal_result = self._recognize_single(image)
+        if normal_result.status != "error":
+            candidates.append(OCRCandidate(mode=OCR_MODE_NORMAL, result=normal_result))
+
+        inverted_result = self._recognize_single(self._invert_image(image))
+        if inverted_result.status != "error":
+            candidates.append(OCRCandidate(mode=OCR_MODE_INVERTED, result=inverted_result))
+
+        if not candidates:
+            return OCRResult(lines=[], display_text="", average_confidence=0.0, status="error")
+
+        return self._select_best_candidate(candidates).result
+
+    def _recognize_single(self, image: Any) -> OCRResult:
         try:
             raw_result = self._predict(image)
         except Exception:
             self._logger.exception("OCR execution failed")
             return OCRResult(lines=[], display_text="", average_confidence=0.0, status="error")
 
-        result = self._normalize_result(raw_result)
-        self._logger.info("OCR result status=%s runtime=%s lines=%s", result.status, self._runtime, len(result.lines))
-        return result
+        return self._normalize_result(raw_result)
 
     def _predict(self, image: Any) -> Any:
         return self._ocr.predict(
@@ -140,6 +178,22 @@ class OCREngine:
             average_confidence=average_confidence,
             status="ok",
         )
+
+    @staticmethod
+    def _select_best_candidate(candidates: list[OCRCandidate]) -> OCRCandidate:
+        return max(
+            candidates,
+            key=lambda candidate: (
+                len(candidate.result.lines),
+                candidate.result.average_confidence,
+                1 if candidate.mode == OCR_MODE_NORMAL else 0,
+            ),
+        )
+
+    @staticmethod
+    def _invert_image(image: Any) -> np.ndarray:
+        array = np.asarray(image, dtype=np.uint8)
+        return np.ascontiguousarray(255 - array, dtype=np.uint8)
 
     @staticmethod
     def _collect_line(lines: list[OCRLine], fallback_lines: list[OCRLine], text: Any, confidence: Any) -> None:

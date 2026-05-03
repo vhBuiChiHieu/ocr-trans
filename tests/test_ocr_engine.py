@@ -4,7 +4,17 @@ import logging
 import unittest
 from types import SimpleNamespace
 
-from core.ocr_engine import OCREngine, OCRResult
+import numpy as np
+from core.ocr_engine import (
+    OCR_MODE_AUTO,
+    OCR_MODE_INVERTED,
+    OCR_MODE_NORMAL,
+    OCR_MODES,
+    OCRCandidate,
+    OCREngine,
+    OCRLine,
+    OCRResult,
+)
 from unittest.mock import patch
 
 
@@ -154,6 +164,126 @@ class OCREngineTests(unittest.TestCase):
         self.assertEqual(created, [False])
         self.assertEqual(result.status, "error")
         self.assertEqual(result.lines, [])
+
+    def test_recognize_exposes_expected_modes(self) -> None:
+        self.assertEqual(OCR_MODES, (OCR_MODE_NORMAL, OCR_MODE_INVERTED, OCR_MODE_AUTO))
+
+    def test_recognize_inverted_mode_uses_inverted_image(self) -> None:
+        fake_engine = FakeEngine(result=wrap_json_page(["Detected"], [0.91]))
+        self.engine._ocr = fake_engine
+        self.engine._runtime = "cpu"
+        image = np.array([[[10, 20, 30]]], dtype=np.uint8)
+
+        result = self.engine.recognize(image=image, mode=OCR_MODE_INVERTED)
+
+        self.assertEqual(result.status, "ok")
+        inverted_image, _kwargs = fake_engine.predict_calls[0]
+        self.assertTrue(np.array_equal(inverted_image, np.array([[[245, 235, 225]]], dtype=np.uint8)))
+
+    def test_select_best_candidate_prefers_more_lines(self) -> None:
+        best = self.engine._select_best_candidate(
+            [
+                OCRCandidate(
+                    mode=OCR_MODE_NORMAL,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.80)],
+                        display_text="one",
+                        average_confidence=0.80,
+                        status="ok",
+                    ),
+                ),
+                OCRCandidate(
+                    mode=OCR_MODE_INVERTED,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.71), OCRLine(text="two", confidence=0.72)],
+                        display_text="one\ntwo",
+                        average_confidence=0.715,
+                        status="ok",
+                    ),
+                ),
+            ]
+        )
+
+        self.assertEqual(best.mode, OCR_MODE_INVERTED)
+
+    def test_select_best_candidate_uses_average_confidence_as_tiebreak(self) -> None:
+        best = self.engine._select_best_candidate(
+            [
+                OCRCandidate(
+                    mode=OCR_MODE_NORMAL,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.80)],
+                        display_text="one",
+                        average_confidence=0.80,
+                        status="ok",
+                    ),
+                ),
+                OCRCandidate(
+                    mode=OCR_MODE_INVERTED,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.90)],
+                        display_text="one",
+                        average_confidence=0.90,
+                        status="ok",
+                    ),
+                ),
+            ]
+        )
+
+        self.assertEqual(best.mode, OCR_MODE_INVERTED)
+
+    def test_select_best_candidate_prefers_normal_on_full_tie(self) -> None:
+        best = self.engine._select_best_candidate(
+            [
+                OCRCandidate(
+                    mode=OCR_MODE_INVERTED,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.80)],
+                        display_text="one",
+                        average_confidence=0.80,
+                        status="ok",
+                    ),
+                ),
+                OCRCandidate(
+                    mode=OCR_MODE_NORMAL,
+                    result=OCRResult(
+                        lines=[OCRLine(text="one", confidence=0.80)],
+                        display_text="one",
+                        average_confidence=0.80,
+                        status="ok",
+                    ),
+                ),
+            ]
+        )
+
+        self.assertEqual(best.mode, OCR_MODE_NORMAL)
+
+    def test_recognize_auto_returns_non_error_branch_when_other_branch_fails(self) -> None:
+        calls: list[np.ndarray] = []
+        expected_inverted = np.array([[[245, 235, 225]]], dtype=np.uint8)
+
+        def fake_predict(image):
+            calls.append(np.array(image, copy=True))
+            if np.array_equal(image, expected_inverted):
+                return wrap_json_page(["Recovered"], [0.91])
+            raise RuntimeError("normal fail")
+
+        self.engine._ocr = SimpleNamespace(predict=lambda image, **kwargs: fake_predict(image))
+        self.engine._runtime = "cpu"
+        image = np.array([[[10, 20, 30]]], dtype=np.uint8)
+
+        result = self.engine.recognize(image=image, mode=OCR_MODE_AUTO)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.display_text, "Recovered")
+        self.assertEqual(len(calls), 2)
+
+    def test_recognize_rejects_unknown_mode(self) -> None:
+        self.engine._ocr = FakeEngine(result=wrap_json_page(["Detected"], [0.91]))
+        self.engine._runtime = "cpu"
+
+        with self.assertRaises(ValueError):
+            self.engine.recognize(image=[[0]], mode="weird")
 
     def test_create_engine_disables_onednn_for_cpu_runtime(self) -> None:
 
