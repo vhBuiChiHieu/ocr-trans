@@ -27,36 +27,46 @@ class ResultOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setStyleSheet(
-            "background-color: rgba(15, 15, 15, 220);"
-            "border: 1px solid rgba(0, 180, 255, 180);"
-            "border-radius: 10px;"
+            "background-color: rgba(18, 18, 18, 208);"
+            "border: none;"
+            "border-radius: 6px;"
         )
         self.hide()
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss: Callable[[], None]) -> None:
+        padding = 12
+        gap = 12
+
         self._dismiss_callback = on_dismiss
         self._label.setText(text)
-        self._label.adjustSize()
 
-        content_width = min(max(self._label.sizeHint().width(), 220), 520)
+        content_width = max(1, anchor_rect.width())
         self._label.setFixedWidth(content_width)
         self._label.adjustSize()
 
-        overlay_width = self._label.width() + 24
-        overlay_height = self._label.height() + 24
+        overlay_width = content_width + (padding * 2)
+        overlay_height = self._label.height() + (padding * 2)
         self.resize(overlay_width, overlay_height)
-        self._label.move(12, 12)
+        self._label.move(padding, padding)
 
         monitor_left = round(capture.monitor.left / capture.scale_x)
         monitor_top = round(capture.monitor.top / capture.scale_y)
         monitor_width = round(capture.monitor.width / capture.scale_x)
         monitor_height = round(capture.monitor.height / capture.scale_y)
+        monitor_right = monitor_left + monitor_width
+        monitor_bottom = monitor_top + monitor_height
 
-        x = monitor_left + anchor_rect.right() + 12
-        y = monitor_top + anchor_rect.top()
-        max_x = monitor_left + max(0, monitor_width - overlay_width)
-        max_y = monitor_top + max(0, monitor_height - overlay_height)
-        self.move(QPoint(min(x, max_x), min(y, max_y)))
+        x = monitor_left + anchor_rect.left()
+        y_below = monitor_top + anchor_rect.bottom() + gap
+        y_above = monitor_top + anchor_rect.top() - overlay_height - gap
+
+        x = max(monitor_left, min(x, monitor_right - overlay_width))
+        if y_below + overlay_height <= monitor_bottom:
+            y = y_below
+        else:
+            y = max(monitor_top, y_above)
+
+        self.move(QPoint(x, y))
 
         self.show()
         self.raise_()
