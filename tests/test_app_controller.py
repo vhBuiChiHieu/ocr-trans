@@ -11,6 +11,7 @@ from PyQt6.QtCore import QRect
 from core.app_controller import AppController, AppControllerDependencies, STATE_IDLE, STATE_PROCESSING, STATE_SELECTING, STATE_SHOWING_RESULT
 from core.coordinate_mapper import PixelRect
 from core.ocr_engine import OCRResult, OCRLine
+from core.ocr_pipeline import OCRPipeline
 from core.screenshot import MonitorBounds, MonitorCapture
 from ui.selection_overlay import SelectionResult
 
@@ -65,13 +66,21 @@ class FakePreprocessor:
 class FakeOCREngine:
     def __init__(self, result: OCRResult) -> None:
         self.result = result
-        self.images: list[np.ndarray] = []
         self.preload_calls = 0
 
     def preload(self) -> None:
         self.preload_calls += 1
 
     def recognize(self, image) -> OCRResult:
+        return self.result
+
+
+class FakeOCRPipeline:
+    def __init__(self, result: OCRResult) -> None:
+        self.result = result
+        self.images: list[np.ndarray] = []
+
+    def run(self, image) -> OCRResult:
         self.images.append(image.copy())
         return self.result
 
@@ -153,6 +162,7 @@ class AppControllerTests(unittest.TestCase):
         )
         preprocessor = FakePreprocessor(preprocessed)
         ocr_engine = FakeOCREngine(ocr_result)
+        ocr_pipeline = FakeOCRPipeline(ocr_result)
         selection_overlay = FakeSelectionOverlay()
         result_overlay = FakeResultOverlay()
         deps = AppControllerDependencies(
@@ -161,14 +171,15 @@ class AppControllerTests(unittest.TestCase):
             coordinate_mapper=mapper,
             preprocessor=preprocessor,
             ocr_engine=ocr_engine,
+            ocr_pipeline=ocr_pipeline,
             selection_overlay=selection_overlay,
             result_overlay=result_overlay,
         )
         controller = AppController(logger=self.logger, deps=deps)
-        return controller, ocr_engine, selection_overlay, result_overlay
+        return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay
 
     def test_start_warms_ocr_in_background(self) -> None:
-        controller, ocr_engine, _selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, ocr_engine, _selection_overlay, _result_overlay = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         thread_patch = patch_thread()
@@ -181,7 +192,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(ocr_engine.preload_calls, 1)
 
     def test_handle_hotkey_starts_selection_flow(self) -> None:
-        controller, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
@@ -191,7 +202,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(len(selection_overlay.show_calls), 1)
 
     def test_confirm_selection_runs_crop_and_shows_result_overlay(self) -> None:
-        controller, ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -209,8 +220,8 @@ class AppControllerTests(unittest.TestCase):
 
         self.assertEqual(selection_overlay.hide_calls, 1)
         self.assertEqual(controller.state, STATE_SHOWING_RESULT)
-        self.assertEqual(len(ocr_engine.images), 1)
-        self.assertEqual(ocr_engine.images[0].shape, (6, 6, 3))
+        self.assertEqual(len(ocr_pipeline.images), 1)
+        self.assertEqual(ocr_pipeline.images[0].shape, (6, 6, 3))
         self.assertEqual(len(result_overlay.show_calls), 1)
         text, rect, capture, _on_dismiss = result_overlay.show_calls[0]
         self.assertEqual(text, "Detected text")
@@ -218,7 +229,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertIs(capture, self.capture)
 
     def test_confirm_selection_returns_idle_for_invalid_crop(self) -> None:
-        controller, ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text"),
             invalid_crop=True,
         )
@@ -228,11 +239,11 @@ class AppControllerTests(unittest.TestCase):
         on_confirm(SelectionResult(rect=QRect(1, 1, 2, 2)))
 
         self.assertEqual(controller.state, STATE_IDLE)
-        self.assertEqual(len(ocr_engine.images), 0)
+        self.assertEqual(len(ocr_pipeline.images), 0)
         self.assertEqual(len(result_overlay.show_calls), 0)
 
     def test_handle_hotkey_ignores_input_while_processing(self) -> None:
-        controller, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         controller.transition_to(STATE_PROCESSING)
@@ -243,7 +254,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_PROCESSING)
 
     def test_dismiss_result_returns_idle(self) -> None:
-        controller, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",

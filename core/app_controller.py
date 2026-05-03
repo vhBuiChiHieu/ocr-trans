@@ -11,6 +11,7 @@ from core.screenshot import MonitorCapture, ScreenshotService
 from core.coordinate_mapper import CoordinateMapper
 from core.preprocessor import ImagePreprocessor
 from core.ocr_engine import OCREngine, OCRResult
+from core.ocr_pipeline import OCRPipeline
 from ui.selection_overlay import SelectionOverlay, SelectionResult
 from ui.result_overlay import ResultOverlay
 
@@ -34,6 +35,7 @@ class AppControllerDependencies:
     coordinate_mapper: CoordinateMapper
     preprocessor: ImagePreprocessor
     ocr_engine: OCREngine
+    ocr_pipeline: OCRPipeline
     selection_overlay: SelectionOverlay
     result_overlay: ResultOverlay
 
@@ -45,15 +47,23 @@ class _ControllerBridge(QObject):
 class AppController:
     def __init__(self, logger: logging.Logger, deps: AppControllerDependencies | None = None) -> None:
         self._logger = logger
-        self._deps = deps or AppControllerDependencies(
-            hotkey=HotkeyManager(logger=logger, on_hotkey=self.handle_hotkey),
-            screenshot=ScreenshotService(),
-            coordinate_mapper=CoordinateMapper(),
-            preprocessor=ImagePreprocessor(),
-            ocr_engine=OCREngine(logger=logger),
-            selection_overlay=SelectionOverlay(),
-            result_overlay=ResultOverlay(),
-        )
+        if deps is None:
+            preprocessor = ImagePreprocessor()
+            ocr_engine = OCREngine(logger=logger)
+            deps = AppControllerDependencies(
+                hotkey=HotkeyManager(logger=logger, on_hotkey=self.handle_hotkey),
+                screenshot=ScreenshotService(),
+                coordinate_mapper=CoordinateMapper(),
+                preprocessor=preprocessor,
+                ocr_engine=ocr_engine,
+                ocr_pipeline=OCRPipeline(
+                    preprocessor=preprocessor,
+                    ocr_engine=ocr_engine,
+                ),
+                selection_overlay=SelectionOverlay(),
+                result_overlay=ResultOverlay(),
+            )
+        self._deps = deps
         self.state = STATE_IDLE
         self._active_capture: MonitorCapture | None = None
         self._active_selection_rect = QRect()
@@ -185,7 +195,7 @@ class AppController:
 
     def _start_ocr(self, capture: MonitorCapture, cropped_image, selection_rect: QRect) -> None:
         def run_ocr() -> None:
-            result = self._deps.ocr_engine.recognize(cropped_image)
+            result = self._deps.ocr_pipeline.run(cropped_image)
             self._bridge.ocr_finished.emit(capture, QRect(selection_rect), result)
 
         threading.Thread(target=run_ocr, name="ocr-worker", daemon=True).start()
