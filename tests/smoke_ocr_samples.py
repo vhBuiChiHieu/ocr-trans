@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 
@@ -11,7 +12,72 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.ocr_engine import OCREngine
-from core.preprocessor import ImagePreprocessor
+from core.ocr_pipeline import OCRPipeline
+from core.preprocessor import (
+    PRESET_BASELINE,
+    PRESET_OUTLINED_HIGH_CONTRAST,
+    PRESET_SMALL_TEXT,
+    ImagePreprocessor,
+)
+
+EVALUATION_RUNS = (
+    (PRESET_BASELINE, "normal"),
+    (PRESET_BASELINE, "auto"),
+    (PRESET_SMALL_TEXT, "normal"),
+    (PRESET_OUTLINED_HIGH_CONTRAST, "auto"),
+)
+
+
+@dataclass(frozen=True)
+class SmokeRow:
+    image: str
+    preset: str
+    mode: str
+    text_summary: str
+    avg_confidence: float
+    note: str
+
+
+def summarize_text(text: str, max_len: int = 60) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= max_len:
+        return collapsed
+    return f"{collapsed[: max_len - 3]}..."
+
+
+def format_row(row: SmokeRow) -> str:
+    return " | ".join(
+        [
+            row.image,
+            row.preset,
+            row.mode,
+            row.text_summary,
+            f"{row.avg_confidence:.2f}",
+            row.note,
+        ]
+    )
+
+
+def evaluate_sample(sample_path: Path, pipeline: OCRPipeline) -> list[SmokeRow]:
+    with Image.open(sample_path) as source_image:
+        image = source_image.convert("RGB")
+    rows: list[SmokeRow] = []
+
+    for preset, mode in EVALUATION_RUNS:
+        result = pipeline.run(image, preset=preset, mode=mode)
+        rows.append(
+            SmokeRow(
+                image=sample_path.name,
+                preset=preset,
+                mode=mode,
+                text_summary=summarize_text(result.display_text),
+                avg_confidence=result.average_confidence,
+                note=result.status,
+            )
+        )
+
+    return rows
+
 
 def main() -> int:
     logger = logging.getLogger("ocr_smoke")
@@ -21,21 +87,17 @@ def main() -> int:
     logger.addHandler(handler)
     logger.propagate = False
 
-    preprocessor = ImagePreprocessor()
-    engine = OCREngine(logger=logger)
-    sample_dir = Path("imgs/ocr_test_input")
+    pipeline = OCRPipeline(preprocessor=ImagePreprocessor(), ocr_engine=OCREngine(logger=logger))
+    sample_dir = PROJECT_ROOT / "imgs/ocr_test_input"
     sample_paths = sorted(sample_dir.glob("*.png"))
     if not sample_paths:
         raise SystemExit("No OCR sample images found in imgs/ocr_test_input")
 
+    print("image | preset | mode | text summary | avg confidence | note")
+    print("--- | --- | --- | --- | --- | ---")
     for sample_path in sample_paths:
-        image = Image.open(sample_path).convert("RGB")
-        prepared = preprocessor.preprocess(image)
-        result = engine.recognize(prepared)
-        print(f"{sample_path.name}: status={result.status} runtime={engine.runtime} lines={len(result.lines)}")
-        if result.display_text:
-            print(result.display_text)
-            print("---")
+        for row in evaluate_sample(sample_path, pipeline):
+            print(format_row(row))
 
     return 0
 
