@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRect, pyqtSignal
 
@@ -20,6 +23,7 @@ STATE_IDLE = "idle"
 STATE_SELECTING = "selecting"
 STATE_PROCESSING = "processing"
 STATE_SHOWING_RESULT = "showing_result"
+_TRANSLATE_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "google_translate.py"
 _ALLOWED_STATES = {
     STATE_IDLE,
     STATE_SELECTING,
@@ -42,6 +46,44 @@ class AppControllerDependencies:
 
 class _ControllerBridge(QObject):
     ocr_finished = pyqtSignal(object, object, object)
+
+
+class TranslationError(RuntimeError):
+    pass
+
+
+class ScriptTranslator:
+    def __init__(self, script_path: Path = _TRANSLATE_SCRIPT_PATH) -> None:
+        self._script_path = script_path
+
+    def translate(self, text: str, sl: str = "en", tl: str = "vi") -> str:
+        escaped_text = text.replace("\n", "\\n")
+        command = [
+            "./.venv/Scripts/python",
+            str(self._script_path),
+            escaped_text,
+            "--sl",
+            sl,
+            "--tl",
+            tl,
+        ]
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+            )
+        except FileNotFoundError as exc:
+            raise TranslationError("translator runtime not found") from exc
+        except subprocess.CalledProcessError as exc:
+            raise TranslationError(exc.stderr.strip() or exc.stdout.strip() or "translator failed") from exc
+
+        return completed.stdout.strip()
 
 
 class AppController:
@@ -68,6 +110,7 @@ class AppController:
                 result_overlay=ResultOverlay(),
             )
         self._deps = deps
+        self._translator = ScriptTranslator()
         self.state = STATE_IDLE
         self._active_capture: MonitorCapture | None = None
         self._active_selection_rect = QRect()
@@ -218,8 +261,17 @@ class AppController:
             return
 
         self._logger.info("OCR text:\n%s", result.display_text)
+        display_text = result.display_text
+        try:
+            translated_text = self._translator.translate(result.display_text)
+            if translated_text.strip():
+                display_text = translated_text
+                self._logger.info("Translated text:\n%s", translated_text)
+        except TranslationError:
+            self._logger.exception("Translation failed")
+
         self._deps.result_overlay.show_result(
-            result.display_text,
+            display_text,
             selection_rect,
             capture,
             on_dismiss=self._dismiss_result,

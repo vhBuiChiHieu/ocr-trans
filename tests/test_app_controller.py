@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import logging
+import tempfile
+import textwrap
 import unittest
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 from PyQt6.QtCore import QRect
 
 from core.app_controller import AppController, AppControllerDependencies, STATE_IDLE, STATE_PROCESSING, STATE_SELECTING, STATE_SHOWING_RESULT
+from core.app_controller import ScriptTranslator, TranslationError
 from core.coordinate_mapper import PixelRect
 from core.ocr_engine import OCRLine, OCRResult
 from core.ocr_pipeline import OCRPipeline
@@ -143,6 +147,39 @@ def patch_thread():
     return ThreadPatch(original=original)
 
 
+class FakeTranslator:
+    def __init__(self, translated_text: str = "", error: Exception | None = None) -> None:
+        self.translated_text = translated_text
+        self.error = error
+        self.calls: list[tuple[str, str, str]] = []
+
+    def translate(self, text: str, sl: str = "en", tl: str = "vi") -> str:
+        self.calls.append((text, sl, tl))
+        if self.error is not None:
+            raise self.error
+        return self.translated_text
+
+
+class ScriptTranslatorTests(unittest.TestCase):
+    def test_translate_reads_unicode_stdout_from_script(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script_path = Path(temp_dir) / "translator_stub.py"
+            script_path.write_text(
+                textwrap.dedent(
+                    """
+                    import sys
+
+                    print("đây là bản dịch")
+                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+
+            translator = ScriptTranslator(script_path=script_path)
+
+            self.assertEqual(translator.translate("hello"), "đây là bản dịch")
+
+
 class AppControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.logger = logging.getLogger("test_app_controller")
@@ -153,7 +190,13 @@ class AppControllerTests(unittest.TestCase):
             scale_y=1.0,
         )
 
-    def make_controller(self, ocr_result: OCRResult, crop_rect: PixelRect | None = None, invalid_crop: bool = False):
+    def make_controller(
+        self,
+        ocr_result: OCRResult,
+        crop_rect: PixelRect | None = None,
+        invalid_crop: bool = False,
+        translator: FakeTranslator | None = None,
+    ):
         preprocessed = np.arange(20 * 20 * 3, dtype=np.uint8).reshape((20, 20, 3))
         hotkey = FakeHotkeyManager()
         screenshot = FakeScreenshotService(self.capture)
@@ -177,6 +220,7 @@ class AppControllerTests(unittest.TestCase):
             result_overlay=result_overlay,
         )
         controller = AppController(logger=self.logger, deps=deps)
+        controller._translator = translator or FakeTranslator()
         return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay
 
     def test_start_warms_ocr_in_background(self) -> None:
@@ -202,14 +246,16 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_SELECTING)
         self.assertEqual(len(selection_overlay.show_calls), 1)
 
-    def test_confirm_selection_runs_crop_and_shows_result_overlay(self) -> None:
+    def test_confirm_selection_translates_ocr_text_before_showing_result_overlay(self) -> None:
+        translator = FakeTranslator(translated_text="Van ban da dich")
         controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
                 average_confidence=0.95,
                 status="ok",
-            )
+            ),
+            translator=translator,
         )
         thread_patch = patch_thread()
         try:
@@ -223,11 +269,59 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_SHOWING_RESULT)
         self.assertEqual(len(ocr_pipeline.images), 1)
         self.assertEqual(ocr_pipeline.images[0].shape, (6, 6, 3))
+        self.assertEqual(translator.calls, [("Detected text", "en", "vi")])
         self.assertEqual(len(result_overlay.show_calls), 1)
         text, rect, capture, _on_dismiss = result_overlay.show_calls[0]
-        self.assertEqual(text, "Detected text")
+        self.assertEqual(text, "Van ban da dich")
         self.assertEqual(rect, QRect(2, 3, 6, 6))
         self.assertIs(capture, self.capture)
+
+    def test_confirm_selection_falls_back_to_ocr_text_when_translation_returns_empty(self) -> None:
+        translator = FakeTranslator(translated_text="   ")
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+            OCRResult(
+                lines=[OCRLine(text="Detected text", confidence=0.95)],
+                display_text="Detected text",
+                average_confidence=0.95,
+                status="ok",
+            ),
+            translator=translator,
+        )
+        thread_patch = patch_thread()
+        try:
+            controller.handle_hotkey()
+            on_confirm = selection_overlay.show_calls[0]["on_confirm"]
+            on_confirm(SelectionResult(rect=QRect(2, 3, 6, 6)))
+        finally:
+            thread_patch.restore()
+
+        self.assertEqual(len(result_overlay.show_calls), 1)
+        text, _rect, _capture, _on_dismiss = result_overlay.show_calls[0]
+        self.assertEqual(text, "Detected text")
+
+    def test_confirm_selection_falls_back_to_ocr_text_when_translation_fails(self) -> None:
+        translator = FakeTranslator(error=TranslationError("boom"))
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+            OCRResult(
+                lines=[OCRLine(text="Line 1\nLine 2", confidence=0.95)],
+                display_text="Line 1\nLine 2",
+                average_confidence=0.95,
+                status="ok",
+            ),
+            translator=translator,
+        )
+        thread_patch = patch_thread()
+        try:
+            controller.handle_hotkey()
+            on_confirm = selection_overlay.show_calls[0]["on_confirm"]
+            on_confirm(SelectionResult(rect=QRect(2, 3, 6, 6)))
+        finally:
+            thread_patch.restore()
+
+        self.assertEqual(translator.calls, [("Line 1\nLine 2", "en", "vi")])
+        self.assertEqual(len(result_overlay.show_calls), 1)
+        text, _rect, _capture, _on_dismiss = result_overlay.show_calls[0]
+        self.assertEqual(text, "Line 1\nLine 2")
 
     def test_confirm_selection_returns_idle_for_invalid_crop(self) -> None:
         controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
