@@ -10,8 +10,9 @@ from PyQt6.QtCore import QRect
 
 from core.app_controller import AppController, AppControllerDependencies, STATE_IDLE, STATE_PROCESSING, STATE_SELECTING, STATE_SHOWING_RESULT
 from core.coordinate_mapper import PixelRect
-from core.ocr_engine import OCRResult, OCRLine
+from core.ocr_engine import OCRLine, OCRResult
 from core.ocr_pipeline import OCRPipeline
+from core.preprocessor import PRESET_BASELINE
 from core.screenshot import MonitorBounds, MonitorCapture
 from ui.selection_overlay import SelectionResult
 
