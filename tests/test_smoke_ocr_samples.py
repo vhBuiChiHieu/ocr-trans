@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from core.ocr_engine import OCRResult
-from tests.smoke_ocr_samples import EVALUATION_RUNS, SmokeRow, evaluate_sample, format_row, summarize_text
+from tests.smoke_ocr_samples import EVALUATION_RUNS, SmokeRow, evaluate_sample, format_row, format_text_block
 
 
 class FakePipeline:
@@ -20,21 +20,21 @@ class FakePipeline:
 
 
 class SmokeHarnessTests(unittest.TestCase):
-    def test_summarize_text_collapses_whitespace_and_truncates(self) -> None:
-        self.assertEqual(summarize_text("hello\n world"), "hello world")
-        self.assertEqual(summarize_text("x" * 70, max_len=10), "xxxxxxx...")
+    def test_format_text_block_preserves_full_text(self) -> None:
+        self.assertEqual(format_text_block("hello\nworld"), "hello\nworld")
+        self.assertEqual(format_text_block(""), "<empty>")
 
     def test_format_row_renders_stable_pipe_table_line(self) -> None:
         row = SmokeRow(
             image="sample.png",
             preset="baseline",
             mode="auto",
-            text_summary="hello",
+            text="hello",
             avg_confidence=0.875,
             note="ok",
         )
 
-        self.assertEqual(format_row(row), "sample.png | baseline | auto | hello | 0.88 | ok")
+        self.assertEqual(format_row(row), "sample.png | baseline | auto | 0.88 | ok")
 
     def test_evaluate_sample_runs_all_configured_preset_mode_pairs(self) -> None:
         pipeline = FakePipeline()

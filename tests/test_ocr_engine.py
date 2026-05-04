@@ -46,6 +46,10 @@ def wrap_legacy_page(*items):
     return [[[[0, 0], [1, 0], [1, 1], [0, 1]], item] for item in items]
 
 
+def make_legacy_item(text: str, confidence: float, box):
+    return [box, (text, confidence)]
+
+
 class OCREngineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.logger = logging.getLogger("test_ocr_engine")
@@ -105,6 +109,85 @@ class OCREngineTests(unittest.TestCase):
         self.assertEqual(result.display_text, "Line 1\nLine 2")
         self.assertEqual(result.status, "ok")
         self.assertEqual(len(result.lines), 2)
+
+    def test_normalize_result_groups_same_row_left_to_right(self) -> None:
+        raw_result = [[
+            make_legacy_item("world", 0.92, [[60, 10], [100, 10], [100, 28], [60, 28]]),
+            make_legacy_item("Hello", 0.94, [[10, 12], [50, 12], [50, 30], [10, 30]]),
+            make_legacy_item("again", 0.91, [[12, 48], [58, 48], [58, 66], [12, 66]]),
+        ]]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "Hello world\nagain")
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(len(result.lines), 3)
+
+    def test_normalize_result_splits_rows_when_vertical_gap_is_large(self) -> None:
+        raw_result = [[
+            make_legacy_item("Line", 0.95, [[10, 10], [40, 10], [40, 30], [10, 30]]),
+            make_legacy_item("One", 0.95, [[50, 12], [88, 12], [88, 32], [50, 32]]),
+            make_legacy_item("Line", 0.95, [[12, 70], [42, 70], [42, 90], [12, 90]]),
+            make_legacy_item("Two", 0.95, [[52, 70], [86, 70], [86, 90], [52, 90]]),
+        ]]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "Line One\nLine Two")
+
+    def test_normalize_result_merges_boxes_with_vertical_overlap(self) -> None:
+        raw_result = [[
+            make_legacy_item("After", 0.95, [[10, 10], [50, 10], [50, 32], [10, 32]]),
+            make_legacy_item("the", 0.95, [[58, 18], [84, 18], [84, 40], [58, 40]]),
+            make_legacy_item("wielder", 0.95, [[92, 14], [156, 14], [156, 36], [92, 36]]),
+            make_legacy_item("Glacio", 0.95, [[12, 60], [72, 60], [72, 82], [12, 82]]),
+        ]]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "After the wielder\nGlacio")
+
+    def test_normalize_result_ignores_malformed_box_and_keeps_text(self) -> None:
+        raw_result = [[
+            make_legacy_item("Visible subtitle", 0.91, ["bad-box"]),
+        ]]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "Visible subtitle")
+        self.assertEqual(result.status, "ok")
+        self.assertIsNone(result.lines[0].box)
+
+    def test_normalize_result_prefers_box_order_when_available(self) -> None:
+        raw_result = [{
+            "rec_texts": ["world", "Hello", "again"],
+            "rec_scores": [0.92, 0.94, 0.91],
+            "rec_boxes": [
+                [[60, 10], [100, 10], [100, 28], [60, 28]],
+                [[10, 12], [50, 12], [50, 30], [10, 30]],
+                [[12, 48], [58, 48], [58, 66], [12, 66]],
+            ],
+        }]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "Hello world\nagain")
+
+    def test_normalize_result_supports_numpy_rec_boxes(self) -> None:
+        raw_result = [{
+            "rec_texts": ["world", "Hello"],
+            "rec_scores": [0.92, 0.94],
+            "rec_boxes": np.array(
+                [
+                    [[60, 10], [100, 10], [100, 28], [60, 28]],
+                    [[10, 12], [50, 12], [50, 30], [10, 30]],
+                ]
+            ),
+        }]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "Hello world")
 
     def test_preload_initializes_cpu_runtime(self) -> None:
         created: list[bool] = []

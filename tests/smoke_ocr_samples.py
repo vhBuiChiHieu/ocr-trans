@@ -33,16 +33,16 @@ class SmokeRow:
     image: str
     preset: str
     mode: str
-    text_summary: str
+    text: str
     avg_confidence: float
     note: str
 
 
-def summarize_text(text: str, max_len: int = 60) -> str:
-    collapsed = " ".join(text.split())
-    if len(collapsed) <= max_len:
-        return collapsed
-    return f"{collapsed[: max_len - 3]}..."
+# Giữ full OCR text để dễ đối chiếu thủ công với từng ảnh input.
+
+
+def format_text_block(text: str) -> str:
+    return text if text else "<empty>"
 
 
 def format_row(row: SmokeRow) -> str:
@@ -51,7 +51,6 @@ def format_row(row: SmokeRow) -> str:
             row.image,
             row.preset,
             row.mode,
-            row.text_summary,
             f"{row.avg_confidence:.2f}",
             row.note,
         ]
@@ -70,7 +69,7 @@ def evaluate_sample(sample_path: Path, pipeline: OCRPipeline) -> list[SmokeRow]:
                 image=sample_path.name,
                 preset=preset,
                 mode=mode,
-                text_summary=summarize_text(result.display_text),
+                text=result.display_text,
                 avg_confidence=result.average_confidence,
                 note=result.status,
             )
@@ -93,11 +92,13 @@ def main() -> int:
     if not sample_paths:
         raise SystemExit("No OCR sample images found in imgs/ocr_test_input")
 
-    print("image | preset | mode | text summary | avg confidence | note")
-    print("--- | --- | --- | --- | --- | ---")
+    print("image | preset | mode | avg confidence | note")
+    print("--- | --- | --- | --- | ---")
     for sample_path in sample_paths:
         for row in evaluate_sample(sample_path, pipeline):
             print(format_row(row))
+            print(format_text_block(row.text))
+            print("---")
 
     return 0
 

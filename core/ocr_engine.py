@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from statistics import median
 from typing import Any
+
+Point = tuple[float, float]
+Box = tuple[Point, ...]
 
 import numpy as np
 
@@ -23,6 +27,10 @@ OCR_MODES = (OCR_MODE_NORMAL, OCR_MODE_INVERTED, OCR_MODE_AUTO)
 class OCRLine:
     text: str
     confidence: float
+    box: Box | None = None
+    center_x: float | None = None
+    center_y: float | None = None
+    height: float | None = None
 
 
 @dataclass(frozen=True)
@@ -130,19 +138,16 @@ class OCREngine:
         fallback_lines: list[OCRLine] = []
 
         for page_result in raw_result or []:
-            if isinstance(page_result, dict):
-                texts = page_result.get("rec_texts", []) or []
-                scores = page_result.get("rec_scores", []) or []
-                for text, confidence in zip(texts, scores):
-                    self._collect_line(lines, fallback_lines, text, confidence)
-                continue
-
-            page_json = getattr(page_result, "json", None)
+            page_json = page_result if isinstance(page_result, dict) else getattr(page_result, "json", None)
             if isinstance(page_json, dict):
-                texts = page_json.get("rec_texts", []) or []
-                scores = page_json.get("rec_scores", []) or []
-                for text, confidence in zip(texts, scores):
-                    self._collect_line(lines, fallback_lines, text, confidence)
+                texts = page_json.get("rec_texts") or []
+                scores = page_json.get("rec_scores") or []
+                boxes = page_json.get("rec_boxes")
+                if boxes is None:
+                    boxes = []
+                for index, (text, confidence) in enumerate(zip(texts, scores)):
+                    box = boxes[index] if index < len(boxes) else None
+                    self._collect_line(lines, fallback_lines, text, confidence, box=box)
                 continue
 
             legacy_items = page_result or []
@@ -152,7 +157,8 @@ class OCREngine:
                         continue
 
                     text, confidence = item[1]
-                    self._collect_line(lines, fallback_lines, text, confidence)
+                    box = item[0] if OCREngine._is_box_like(item[0]) else None
+                    self._collect_line(lines, fallback_lines, text, confidence, box=box)
                 continue
 
             for block in page_result or []:
@@ -161,7 +167,8 @@ class OCREngine:
                         continue
 
                     text, confidence = item[1]
-                    self._collect_line(lines, fallback_lines, text, confidence)
+                    box = item[0] if OCREngine._is_box_like(item[0]) else None
+                    self._collect_line(lines, fallback_lines, text, confidence, box=box)
 
         if not lines and fallback_lines:
             best_line = max(fallback_lines, key=lambda line: line.confidence)
@@ -170,7 +177,7 @@ class OCREngine:
         if not lines:
             return OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
 
-        display_text = "\n".join(line.text for line in lines)
+        display_text = self._build_display_text(lines)
         average_confidence = sum(line.confidence for line in lines) / len(lines)
         return OCRResult(
             lines=lines,
@@ -178,6 +185,62 @@ class OCREngine:
             average_confidence=average_confidence,
             status="ok",
         )
+
+    @staticmethod
+    def _build_display_text(lines: list[OCRLine]) -> str:
+        geometric_lines = [line for line in lines if line.center_x is not None and line.center_y is not None]
+        if not geometric_lines:
+            return "\n".join(line.text for line in lines)
+
+        row_heights = [line.height for line in geometric_lines if line.height is not None and line.height > 0]
+        row_threshold = max(8.0, median(row_heights) * 0.9) if row_heights else 14.0
+
+        rows: list[list[OCRLine]] = []
+        pending_unpositioned: list[OCRLine] = []
+        for line in sorted(
+            lines,
+            key=lambda current: (
+                float("inf") if current.center_y is None else current.center_y,
+                float("inf") if current.center_x is None else current.center_x,
+            ),
+        ):
+            if line.center_y is None or line.center_x is None:
+                pending_unpositioned.append(line)
+                continue
+
+            if not rows or not OCREngine._should_merge_into_row(rows[-1], line, row_threshold):
+                rows.append([line])
+                continue
+
+            rows[-1].append(line)
+
+        rendered_rows = [
+            " ".join(item.text for item in sorted(row, key=lambda current: current.center_x or 0.0))
+            for row in rows
+            if row
+        ]
+        rendered_rows.extend(line.text for line in pending_unpositioned)
+        return "\n".join(rendered_rows)
+
+    @staticmethod
+    def _should_merge_into_row(row: list[OCRLine], line: OCRLine, row_threshold: float) -> bool:
+        row_tops = [item.center_y - (item.height or 0.0) / 2 for item in row if item.center_y is not None]
+        row_bottoms = [item.center_y + (item.height or 0.0) / 2 for item in row if item.center_y is not None]
+        if not row_tops or not row_bottoms or line.center_y is None:
+            return False
+
+        line_height = line.height or 0.0
+        line_top = line.center_y - line_height / 2
+        line_bottom = line.center_y + line_height / 2
+        row_top = min(row_tops)
+        row_bottom = max(row_bottoms)
+        overlap = min(row_bottom, line_bottom) - max(row_top, line_top)
+        min_height = max(1.0, min(row_bottom - row_top, line_height))
+        if overlap >= min_height * 0.2:
+            return True
+
+        row_center = (row_top + row_bottom) / 2
+        return abs(line.center_y - row_center) <= row_threshold
 
     @staticmethod
     def _select_best_candidate(candidates: list[OCRCandidate]) -> OCRCandidate:
@@ -196,16 +259,155 @@ class OCREngine:
         return np.ascontiguousarray(255 - array, dtype=np.uint8)
 
     @staticmethod
-    def _collect_line(lines: list[OCRLine], fallback_lines: list[OCRLine], text: Any, confidence: Any) -> None:
+    def _collect_line(
+        lines: list[OCRLine],
+        fallback_lines: list[OCRLine],
+        text: Any,
+        confidence: Any,
+        box: Any = None,
+    ) -> None:
         normalized_text = str(text).strip()
         normalized_confidence = float(confidence)
         if not normalized_text:
             return
 
-        line = OCRLine(text=normalized_text, confidence=normalized_confidence)
+        normalized_box = OCREngine._normalize_box(box)
+        line = OCRLine(
+            text=normalized_text,
+            confidence=normalized_confidence,
+            box=normalized_box,
+            center_x=OCREngine._box_center_x(normalized_box),
+            center_y=OCREngine._box_center_y(normalized_box),
+            height=OCREngine._box_height(normalized_box),
+        )
         if normalized_confidence >= OCR_CONFIDENCE_THRESHOLD:
             lines.append(line)
             return
 
         if normalized_confidence >= 0.5 and any(char.isalnum() for char in normalized_text) and len(normalized_text) >= 4:
             fallback_lines.append(line)
+
+    @staticmethod
+    def _normalize_box(box: Any) -> Box | None:
+        if not OCREngine._is_box_like(box):
+            return None
+
+        points: list[Point] = []
+        for point in box:
+            if not OCREngine._is_box_like(point) or len(point) < 2:
+                return None
+            try:
+                points.append((float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                return None
+
+        return tuple(points)
+
+    @staticmethod
+    def _is_box_like(value: Any) -> bool:
+        return hasattr(value, "__len__") and hasattr(value, "__getitem__") and len(value) > 0
+
+    @staticmethod
+    def _box_center_x(box: Box | None) -> float | None:
+        if not box:
+            return None
+        return sum(point[0] for point in box) / len(box)
+
+    @staticmethod
+    def _box_center_y(box: Box | None) -> float | None:
+        if not box:
+            return None
+        return sum(point[1] for point in box) / len(box)
+
+    @staticmethod
+    def _box_height(box: Box | None) -> float | None:
+        if not box:
+            return None
+        ys = [point[1] for point in box]
+        return max(ys) - min(ys)
+        rendered_rows.extend(line.text for line in pending_unpositioned)
+        return "\n".join(rendered_rows)
+
+    @staticmethod
+    def _select_best_candidate(candidates: list[OCRCandidate]) -> OCRCandidate:
+        return max(
+            candidates,
+            key=lambda candidate: (
+                len(candidate.result.lines),
+                candidate.result.average_confidence,
+                1 if candidate.mode == OCR_MODE_NORMAL else 0,
+            ),
+        )
+
+    @staticmethod
+    def _invert_image(image: Any) -> np.ndarray:
+        array = np.asarray(image, dtype=np.uint8)
+        return np.ascontiguousarray(255 - array, dtype=np.uint8)
+
+    @staticmethod
+    def _collect_line(
+        lines: list[OCRLine],
+        fallback_lines: list[OCRLine],
+        text: Any,
+        confidence: Any,
+        box: Any = None,
+    ) -> None:
+        normalized_text = str(text).strip()
+        normalized_confidence = float(confidence)
+        if not normalized_text:
+            return
+
+        normalized_box = OCREngine._normalize_box(box)
+        line = OCRLine(
+            text=normalized_text,
+            confidence=normalized_confidence,
+            box=normalized_box,
+            center_x=OCREngine._box_center_x(normalized_box),
+            center_y=OCREngine._box_center_y(normalized_box),
+            height=OCREngine._box_height(normalized_box),
+        )
+        if normalized_confidence >= OCR_CONFIDENCE_THRESHOLD:
+            lines.append(line)
+            return
+
+        if normalized_confidence >= 0.5 and any(char.isalnum() for char in normalized_text) and len(normalized_text) >= 4:
+            fallback_lines.append(line)
+
+    @staticmethod
+    def _normalize_box(box: Any) -> Box | None:
+        if not OCREngine._is_box_like(box):
+            return None
+
+        points: list[Point] = []
+        for point in box:
+            if not OCREngine._is_box_like(point) or len(point) < 2:
+                return None
+            try:
+                points.append((float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                return None
+
+        return tuple(points)
+
+    @staticmethod
+    def _is_box_like(value: Any) -> bool:
+        return hasattr(value, "__len__") and hasattr(value, "__getitem__") and len(value) > 0
+
+    @staticmethod
+    def _box_center_x(box: Box | None) -> float | None:
+        if not box:
+            return None
+        return sum(point[0] for point in box) / len(box)
+
+    @staticmethod
+    def _box_center_y(box: Box | None) -> float | None:
+        if not box:
+            return None
+        return sum(point[1] for point in box) / len(box)
+
+    @staticmethod
+    def _box_height(box: Box | None) -> float | None:
+        if not box:
+            return None
+        ys = [point[1] for point in box]
+        return max(ys) - min(ys)
