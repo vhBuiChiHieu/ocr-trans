@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QLabel, QWidget
 from core.screenshot import MonitorCapture
 
 
-DEFAULT_FONT_SIZE = 12
+DEFAULT_FONT_SIZE = 14
 
 
 class ResultOverlay(QWidget):
@@ -19,6 +19,7 @@ class ResultOverlay(QWidget):
         self._dismiss_callback: Callable[[], None] | None = None
         self._font_size = font_size
         self._label.setWordWrap(True)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._label.setStyleSheet("color: white; background: transparent;")
         self._apply_font_size()

@@ -225,7 +225,7 @@ class OCREngine:
     def _build_display_text(lines: list[OCRLine]) -> str:
         geometric_lines = [line for line in lines if line.center_x is not None and line.center_y is not None]
         if not geometric_lines:
-            return "\n".join(line.text for line in lines)
+            return OCREngine._join_segments_into_sentences(line.text for line in lines)
 
         row_heights = [line.height for line in geometric_lines if line.height is not None and line.height > 0]
         row_threshold = max(8.0, median(row_heights) * 0.9) if row_heights else 14.0
@@ -255,7 +255,35 @@ class OCREngine:
             if row
         ]
         rendered_rows.extend(line.text for line in pending_unpositioned)
-        return "\n".join(rendered_rows)
+        return OCREngine._join_segments_into_sentences(rendered_rows)
+
+    @staticmethod
+    def _join_segments_into_sentences(segments) -> str:
+        lines: list[str] = []
+        current = ""
+        for segment in segments:
+            normalized_segment = str(segment).strip()
+            if not normalized_segment:
+                continue
+            if current:
+                current = f"{current} {normalized_segment}"
+            else:
+                current = normalized_segment
+            if OCREngine._ends_with_sentence_punctuation(normalized_segment):
+                lines.append(current)
+                current = ""
+
+        if current:
+            lines.append(current)
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _ends_with_sentence_punctuation(text: str) -> bool:
+        stripped = text.rstrip()
+        while stripped and stripped[-1] in '"\'”’)]}':
+            stripped = stripped[:-1].rstrip()
+        return stripped.endswith(("...", ".", "!", "?"))
 
     @staticmethod
     def _should_merge_into_row(row: list[OCRLine], line: OCRLine, row_threshold: float) -> bool:

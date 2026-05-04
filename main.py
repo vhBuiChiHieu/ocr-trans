@@ -15,9 +15,9 @@ APP_ICON_PATH = Path(__file__).resolve().parent / "imgs" / "app_icon.png"
 
 
 FONT_SIZE_OPTIONS = {
-    "Small": 11,
+    "Small": 13,
     "Medium": DEFAULT_FONT_SIZE,
-    "Large": 13,
+    "Large": 15,
 }
 
 
