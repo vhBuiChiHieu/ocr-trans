@@ -3,11 +3,12 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from PyQt6.QtCore import QRect
+from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 
 from core.screenshot import MonitorBounds, MonitorCapture
-from ui.result_overlay import ResultOverlay
+from ui.result_overlay import DEFAULT_FONT_SIZE, ResultOverlay
 
 
 class ResultOverlayTests(unittest.TestCase):
@@ -34,6 +35,10 @@ class ResultOverlayTests(unittest.TestCase):
         self.assertIn("border-radius: 6px", style)
         self.assertIn("background-color: rgba(18, 18, 18, 208)", style)
 
+    def test_overlay_uses_larger_default_font_size(self) -> None:
+        self.assertEqual(self.overlay.font_size, DEFAULT_FONT_SIZE)
+        self.assertEqual(self.overlay._label.font().pointSize(), DEFAULT_FONT_SIZE)
+
     def test_show_result_matches_anchor_width_and_places_below(self) -> None:
         anchor_rect = QRect(20, 30, 120, 40)
 
@@ -53,6 +58,16 @@ class ResultOverlayTests(unittest.TestCase):
         self.assertEqual(self.overlay._label.width(), 120)
         self.assertEqual(self.overlay.x(), 120)
         self.assertEqual(self.overlay.y() + self.overlay.height(), 188)
+
+    def test_escape_dismisses_overlay(self) -> None:
+        dismissed = []
+        anchor_rect = QRect(20, 30, 120, 40)
+        self.overlay.show_result("Detected text", anchor_rect, self.capture, on_dismiss=lambda: dismissed.append(True))
+
+        event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        self.overlay.keyPressEvent(event)
+
+        self.assertEqual(dismissed, [True])
 
 
 if __name__ == "__main__":

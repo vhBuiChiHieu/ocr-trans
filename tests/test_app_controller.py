@@ -113,12 +113,16 @@ class FakeResultOverlay:
     def __init__(self) -> None:
         self.show_calls: list[tuple[str, QRect, MonitorCapture, object]] = []
         self.hide_calls = 0
+        self.font_size = None
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss) -> None:
         self.show_calls.append((text, QRect(anchor_rect), capture, on_dismiss))
 
     def hide_result(self) -> None:
         self.hide_calls += 1
+
+    def set_font_size(self, font_size: int) -> None:
+        self.font_size = font_size
 
 
 class ImmediateThread:
@@ -370,6 +374,15 @@ class AppControllerTests(unittest.TestCase):
 
         self.assertEqual(controller.state, STATE_IDLE)
         self.assertEqual(result_overlay.hide_calls, 1)
+
+    def test_set_result_font_size_updates_overlay(self) -> None:
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+
+        controller.set_result_font_size(13)
+
+        self.assertEqual(result_overlay.font_size, 13)
 
 
 if __name__ == "__main__":

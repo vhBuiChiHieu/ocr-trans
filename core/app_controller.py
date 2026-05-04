@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,12 @@ STATE_IDLE = "idle"
 STATE_SELECTING = "selecting"
 STATE_PROCESSING = "processing"
 STATE_SHOWING_RESULT = "showing_result"
-_TRANSLATE_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "google_translate.py"
+def _resource_path(relative_path: str) -> Path:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base_path / relative_path
+
+
+_TRANSLATE_SCRIPT_PATH = _resource_path("scripts/google_translate.py")
 _ALLOWED_STATES = {
     STATE_IDLE,
     STATE_SELECTING,
@@ -59,7 +65,7 @@ class ScriptTranslator:
     def translate(self, text: str, sl: str = "en", tl: str = "vi") -> str:
         escaped_text = text.replace("\n", "\\n")
         command = [
-            "./.venv/Scripts/python",
+            sys.executable,
             str(self._script_path),
             escaped_text,
             "--sl",
@@ -131,6 +137,10 @@ class AppController:
         self._active_capture = None
         self._active_selection_rect = QRect()
         self.transition_to(STATE_IDLE)
+
+    def set_result_font_size(self, font_size: int) -> None:
+        self._logger.info("Setting result overlay font size to %s", font_size)
+        self._deps.result_overlay.set_font_size(font_size)
 
     def _preload_ocr(self) -> None:
         try:

@@ -9,15 +9,19 @@ from PyQt6.QtWidgets import QLabel, QWidget
 from core.screenshot import MonitorCapture
 
 
+DEFAULT_FONT_SIZE = 12
+
+
 class ResultOverlay(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, font_size: int = DEFAULT_FONT_SIZE) -> None:
         super().__init__()
         self._label = QLabel(self)
         self._dismiss_callback: Callable[[], None] | None = None
+        self._font_size = font_size
         self._label.setWordWrap(True)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._label.setStyleSheet("color: white; background: transparent;")
-        self._label.setFont(QFont("Segoe UI", 11))
+        self._apply_font_size()
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -32,6 +36,18 @@ class ResultOverlay(QWidget):
             "border-radius: 6px;"
         )
         self.hide()
+
+    @property
+    def font_size(self) -> int:
+        return self._font_size
+
+    def set_font_size(self, font_size: int) -> None:
+        self._font_size = font_size
+        self._apply_font_size()
+        self._label.adjustSize()
+
+    def _apply_font_size(self) -> None:
+        self._label.setFont(QFont("Segoe UI", self._font_size))
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss: Callable[[], None]) -> None:
         padding = 12
@@ -72,8 +88,10 @@ class ResultOverlay(QWidget):
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        self.grabKeyboard()
 
     def hide_result(self) -> None:
+        self.releaseKeyboard()
         self.hide()
         self._dismiss_callback = None
 
