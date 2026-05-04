@@ -53,6 +53,38 @@ class OCREngine:
         self._ocr = None
         self._runtime = "uninitialized"
 
+    def _log_result_details(self, result: OCRResult) -> None:
+        self._logger.info(
+            "OCR detail: status=%s avg_conf=%.3f line_count=%d display_text=%r",
+            result.status,
+            result.average_confidence,
+            len(result.lines),
+            result.display_text,
+        )
+        if not result.lines:
+            return
+
+        self._logger.info(
+            "OCR detail lines:\n%s",
+            "\n".join(self._format_line_detail(index, line) for index, line in enumerate(result.lines, start=1)),
+        )
+
+    @staticmethod
+    def _format_line_detail(index: int, line: OCRLine) -> str:
+        center_x = "-" if line.center_x is None else f"{line.center_x:.1f}"
+        center_y = "-" if line.center_y is None else f"{line.center_y:.1f}"
+        height = "-" if line.height is None else f"{line.height:.1f}"
+        return (
+            f"[{index:02d}] conf={line.confidence:.3f} center=({center_x}, {center_y}) "
+            f"height={height} box={OCREngine._format_box(line.box)} text={line.text!r}"
+        )
+
+    @staticmethod
+    def _format_box(box: Box | None) -> str:
+        if not box:
+            return "-"
+        return "[" + ", ".join(f"({x:.1f},{y:.1f})" for x, y in box) + "]"
+
     def preload(self) -> None:
         if self._ocr is not None:
             return
@@ -75,6 +107,7 @@ class OCREngine:
             raise ValueError(f"Unsupported OCR mode: {mode}")
 
         self._logger.info("OCR result status=%s runtime=%s lines=%s mode=%s", result.status, self._runtime, len(result.lines), mode)
+        self._log_result_details(result)
         return result
 
     def _recognize_auto(self, image: Any) -> OCRResult:
@@ -123,13 +156,15 @@ class OCREngine:
         kwargs: dict[str, Any] = {
             "lang": "en",
             "device": device,
+            "text_detection_model_name": "PP-OCRv5_mobile_det",
+            "text_recognition_model_name": "en_PP-OCRv5_mobile_rec",
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
         }
         if not use_gpu:
             kwargs["enable_mkldnn"] = False
-            kwargs["cpu_threads"] = 4
+            kwargs["cpu_threads"] = 8
 
         return PaddleOCR(**kwargs)
 

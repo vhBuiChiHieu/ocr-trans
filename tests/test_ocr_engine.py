@@ -380,8 +380,10 @@ class OCREngineTests(unittest.TestCase):
             self.engine._create_engine(use_gpu=False)
 
         self.assertEqual(created_kwargs["device"], "cpu")
+        self.assertEqual(created_kwargs["text_detection_model_name"], "PP-OCRv5_mobile_det")
+        self.assertEqual(created_kwargs["text_recognition_model_name"], "en_PP-OCRv5_mobile_rec")
         self.assertFalse(created_kwargs["enable_mkldnn"])
-        self.assertEqual(created_kwargs["cpu_threads"], 4)
+        self.assertEqual(created_kwargs["cpu_threads"], 8)
 
 
 
