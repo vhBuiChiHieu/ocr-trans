@@ -15,6 +15,7 @@ from core.screenshot import MonitorCapture, ScreenshotService
 from core.coordinate_mapper import CoordinateMapper
 from core.preprocessor import ImagePreprocessor, PRESET_BASELINE
 from core.ocr_engine import OCR_MODE_NORMAL, OCREngine, OCRResult
+from core.ocr_history import OCRHistoryEntry, OCRHistoryStore
 from core.ocr_pipeline import OCRPipeline, OCRPipelineConfig
 from ui.selection_overlay import SelectionOverlay, SelectionResult
 from ui.result_overlay import ResultOverlay
@@ -24,6 +25,16 @@ STATE_IDLE = "idle"
 STATE_SELECTING = "selecting"
 STATE_PROCESSING = "processing"
 STATE_SHOWING_RESULT = "showing_result"
+OUTPUT_MODE_OCR_ONLY = "ocr_only"
+OUTPUT_MODE_TRANSLATE = "translate"
+OUTPUT_MODE_BOTH = "both"
+_OUTPUT_MODES = {
+    OUTPUT_MODE_OCR_ONLY,
+    OUTPUT_MODE_TRANSLATE,
+    OUTPUT_MODE_BOTH,
+}
+
+
 def _resource_path(relative_path: str) -> Path:
     base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
     return base_path / relative_path
@@ -48,6 +59,7 @@ class AppControllerDependencies:
     ocr_pipeline: OCRPipeline
     selection_overlay: SelectionOverlay
     result_overlay: ResultOverlay
+    ocr_history: OCRHistoryStore
 
 
 class _ControllerBridge(QObject):
@@ -114,10 +126,12 @@ class AppController:
                 ),
                 selection_overlay=SelectionOverlay(),
                 result_overlay=ResultOverlay(),
+                ocr_history=OCRHistoryStore(),
             )
         self._deps = deps
         self._translator = ScriptTranslator()
         self.state = STATE_IDLE
+        self._output_mode = OUTPUT_MODE_TRANSLATE
         self._active_capture: MonitorCapture | None = None
         self._active_selection_rect = QRect()
         self._bridge = _ControllerBridge()
@@ -141,6 +155,13 @@ class AppController:
     def set_result_font_size(self, font_size: int) -> None:
         self._logger.info("Setting result overlay font size to %s", font_size)
         self._deps.result_overlay.set_font_size(font_size)
+
+    def set_output_mode(self, mode: str) -> None:
+        if mode not in _OUTPUT_MODES:
+            raise ValueError(f"Invalid output mode: {mode}")
+
+        self._logger.info("Setting output mode to %s", mode)
+        self._output_mode = mode
 
     def _preload_ocr(self) -> None:
         try:
@@ -271,14 +292,16 @@ class AppController:
             return
 
         self._logger.info("OCR text:\n%s", result.display_text)
-        display_text = result.display_text
-        try:
-            translated_text = self._translator.translate(result.display_text)
-            if translated_text.strip():
-                display_text = translated_text
-                self._logger.info("Translated text:\n%s", translated_text)
-        except TranslationError:
-            self._logger.exception("Translation failed")
+        translated_text = self._translate_text(result.display_text)
+        display_text = self._build_display_text(result.display_text, translated_text)
+        self._deps.ocr_history.add(
+            OCRHistoryEntry(
+                mode=self._output_mode,
+                ocr_text=result.display_text,
+                translated_text=translated_text,
+                display_text=display_text,
+            )
+        )
 
         self._deps.result_overlay.show_result(
             display_text,
@@ -287,6 +310,30 @@ class AppController:
             on_dismiss=self._dismiss_result,
         )
         self.transition_to(STATE_SHOWING_RESULT)
+
+    def _translate_text(self, text: str) -> str:
+        if self._output_mode == OUTPUT_MODE_OCR_ONLY:
+            return ""
+
+        try:
+            translated_text = self._translator.translate(text)
+        except TranslationError:
+            self._logger.exception("Translation failed")
+            return ""
+
+        translated_text = translated_text.strip()
+        if translated_text:
+            self._logger.info("Translated text:\n%s", translated_text)
+        return translated_text
+
+    def _build_display_text(self, ocr_text: str, translated_text: str) -> str:
+        if self._output_mode == OUTPUT_MODE_BOTH and translated_text:
+            return f"OCR:\n{ocr_text}\n\nTranslation:\n{translated_text}"
+
+        if self._output_mode == OUTPUT_MODE_TRANSLATE and translated_text:
+            return translated_text
+
+        return ocr_text
 
     def _dismiss_result(self) -> None:
         self._logger.info("Result overlay dismissed")

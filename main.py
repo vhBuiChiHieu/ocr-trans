@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from core.app_controller import AppController
+from core.app_controller import AppController, OUTPUT_MODE_BOTH, OUTPUT_MODE_OCR_ONLY, OUTPUT_MODE_TRANSLATE
 from ui.result_overlay import DEFAULT_FONT_SIZE
 from utils.logger import setup_logger
 
@@ -18,6 +18,11 @@ FONT_SIZE_OPTIONS = {
     "Small": 13,
     "Medium": DEFAULT_FONT_SIZE,
     "Large": 15,
+}
+OUTPUT_MODE_OPTIONS = {
+    "OCR only": OUTPUT_MODE_OCR_ONLY,
+    "Translate": OUTPUT_MODE_TRANSLATE,
+    "Both": OUTPUT_MODE_BOTH,
 }
 
 
@@ -69,6 +74,17 @@ def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTra
         action.setChecked(size == DEFAULT_FONT_SIZE)
         font_action_group.addAction(action)
         action.triggered.connect(partial(controller.set_result_font_size, size))
+
+    output_menu = menu.addMenu("Output mode")
+    output_action_group = QActionGroup(output_menu)
+    output_action_group.setExclusive(True)
+
+    for label, mode in OUTPUT_MODE_OPTIONS.items():
+        action = output_menu.addAction(label)
+        action.setCheckable(True)
+        action.setChecked(mode == OUTPUT_MODE_TRANSLATE)
+        output_action_group.addAction(action)
+        action.triggered.connect(partial(controller.set_output_mode, mode))
 
     menu.addSeparator()
     menu.addAction("Exit", app.quit)

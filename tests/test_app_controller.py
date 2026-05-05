@@ -11,7 +11,16 @@ from types import SimpleNamespace
 import numpy as np
 from PyQt6.QtCore import QRect
 
-from core.app_controller import AppController, AppControllerDependencies, STATE_IDLE, STATE_PROCESSING, STATE_SELECTING, STATE_SHOWING_RESULT
+from core.app_controller import (
+    OUTPUT_MODE_BOTH,
+    OUTPUT_MODE_OCR_ONLY,
+    AppController,
+    AppControllerDependencies,
+    STATE_IDLE,
+    STATE_PROCESSING,
+    STATE_SELECTING,
+    STATE_SHOWING_RESULT,
+)
 from core.app_controller import ScriptTranslator, TranslationError
 from core.coordinate_mapper import PixelRect
 from core.ocr_engine import OCRLine, OCRResult
@@ -107,6 +116,14 @@ class FakeSelectionOverlay:
 
     def hide_overlay(self) -> None:
         self.hide_calls += 1
+
+
+class FakeHistoryStore:
+    def __init__(self) -> None:
+        self.entries = []
+
+    def add(self, entry) -> None:
+        self.entries.append(entry)
 
 
 class FakeResultOverlay:
@@ -213,6 +230,7 @@ class AppControllerTests(unittest.TestCase):
         ocr_pipeline = FakeOCRPipeline(ocr_result)
         selection_overlay = FakeSelectionOverlay()
         result_overlay = FakeResultOverlay()
+        history = FakeHistoryStore()
         deps = AppControllerDependencies(
             hotkey=hotkey,
             screenshot=screenshot,
@@ -222,13 +240,14 @@ class AppControllerTests(unittest.TestCase):
             ocr_pipeline=ocr_pipeline,
             selection_overlay=selection_overlay,
             result_overlay=result_overlay,
+            ocr_history=history,
         )
         controller = AppController(logger=self.logger, deps=deps)
         controller._translator = translator or FakeTranslator()
-        return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay
+        return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay, history
 
     def test_start_warms_ocr_in_background(self) -> None:
-        controller, _ocr_pipeline, ocr_engine, _selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, ocr_engine, _selection_overlay, _result_overlay, _history = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         thread_patch = patch_thread()
@@ -241,7 +260,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(ocr_engine.preload_calls, 1)
 
     def test_handle_hotkey_starts_selection_flow(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
@@ -252,7 +271,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_translates_ocr_text_before_showing_result_overlay(self) -> None:
         translator = FakeTranslator(translated_text="Van ban da dich")
-        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -279,10 +298,64 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(text, "Van ban da dich")
         self.assertEqual(rect, QRect(2, 3, 6, 6))
         self.assertIs(capture, self.capture)
+        self.assertEqual(len(history.entries), 1)
+        self.assertEqual(history.entries[0].ocr_text, "Detected text")
+        self.assertEqual(history.entries[0].translated_text, "Van ban da dich")
+        self.assertEqual(history.entries[0].display_text, "Van ban da dich")
+
+    def test_confirm_selection_ocr_only_skips_translation(self) -> None:
+        translator = FakeTranslator(translated_text="Van ban da dich")
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
+            OCRResult(
+                lines=[OCRLine(text="Detected text", confidence=0.95)],
+                display_text="Detected text",
+                average_confidence=0.95,
+                status="ok",
+            ),
+            translator=translator,
+        )
+        controller.set_output_mode(OUTPUT_MODE_OCR_ONLY)
+        thread_patch = patch_thread()
+        try:
+            controller.handle_hotkey()
+            on_confirm = selection_overlay.show_calls[0]["on_confirm"]
+            on_confirm(SelectionResult(rect=QRect(2, 3, 6, 6)))
+        finally:
+            thread_patch.restore()
+
+        self.assertEqual(translator.calls, [])
+        text, _rect, _capture, _on_dismiss = result_overlay.show_calls[0]
+        self.assertEqual(text, "Detected text")
+        self.assertEqual(history.entries[0].mode, OUTPUT_MODE_OCR_ONLY)
+
+    def test_confirm_selection_both_mode_shows_ocr_and_translation(self) -> None:
+        translator = FakeTranslator(translated_text="Van ban da dich")
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
+            OCRResult(
+                lines=[OCRLine(text="Detected text", confidence=0.95)],
+                display_text="Detected text",
+                average_confidence=0.95,
+                status="ok",
+            ),
+            translator=translator,
+        )
+        controller.set_output_mode(OUTPUT_MODE_BOTH)
+        thread_patch = patch_thread()
+        try:
+            controller.handle_hotkey()
+            on_confirm = selection_overlay.show_calls[0]["on_confirm"]
+            on_confirm(SelectionResult(rect=QRect(2, 3, 6, 6)))
+        finally:
+            thread_patch.restore()
+
+        text, _rect, _capture, _on_dismiss = result_overlay.show_calls[0]
+        self.assertEqual(text, "OCR:\nDetected text\n\nTranslation:\nVan ban da dich")
+        self.assertEqual(history.entries[0].mode, OUTPUT_MODE_BOTH)
+        self.assertEqual(history.entries[0].translated_text, "Van ban da dich")
 
     def test_confirm_selection_falls_back_to_ocr_text_when_translation_returns_empty(self) -> None:
         translator = FakeTranslator(translated_text="   ")
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -305,7 +378,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_falls_back_to_ocr_text_when_translation_fails(self) -> None:
         translator = FakeTranslator(error=TranslationError("boom"))
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Line 1\nLine 2", confidence=0.95)],
                 display_text="Line 1\nLine 2",
@@ -328,7 +401,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(text, "Line 1\nLine 2")
 
     def test_confirm_selection_returns_idle_for_invalid_crop(self) -> None:
-        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text"),
             invalid_crop=True,
         )
@@ -340,9 +413,10 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_IDLE)
         self.assertEqual(len(ocr_pipeline.images), 0)
         self.assertEqual(len(result_overlay.show_calls), 0)
+        self.assertEqual(history.entries, [])
 
     def test_handle_hotkey_ignores_input_while_processing(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         controller.transition_to(STATE_PROCESSING)
@@ -353,7 +427,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_PROCESSING)
 
     def test_dismiss_result_returns_idle(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -376,7 +450,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(result_overlay.hide_calls, 1)
 
     def test_set_result_font_size_updates_overlay(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 

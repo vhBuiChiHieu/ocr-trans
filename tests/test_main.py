@@ -8,15 +8,19 @@ from unittest.mock import patch
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from main import APP_ICON_PATH, DEFAULT_FONT_SIZE, FONT_SIZE_OPTIONS, _load_tray_icon, create_tray_icon
+from main import APP_ICON_PATH, DEFAULT_FONT_SIZE, FONT_SIZE_OPTIONS, OUTPUT_MODE_OPTIONS, _load_tray_icon, create_tray_icon
 
 
 class FakeController:
     def __init__(self) -> None:
         self.font_sizes: list[int] = []
+        self.output_modes: list[str] = []
 
     def set_result_font_size(self, font_size: int) -> None:
         self.font_sizes.append(font_size)
+
+    def set_output_mode(self, mode: str) -> None:
+        self.output_modes.append(mode)
 
 
 class MainTrayTests(unittest.TestCase):
@@ -45,11 +49,12 @@ class MainTrayTests(unittest.TestCase):
         self.assertIsInstance(menu, QMenu)
 
         actions = menu.actions()
-        self.assertEqual(len(actions), 3)
+        self.assertEqual(len(actions), 4)
         self.assertEqual(actions[0].text(), "Font size")
-        self.assertTrue(actions[1].isSeparator())
-        self.assertIsInstance(actions[2], QAction)
-        self.assertEqual(actions[2].text(), "Exit")
+        self.assertEqual(actions[1].text(), "Output mode")
+        self.assertTrue(actions[2].isSeparator())
+        self.assertIsInstance(actions[3], QAction)
+        self.assertEqual(actions[3].text(), "Exit")
 
         font_menu = actions[0].menu()
         self.assertIsNotNone(font_menu)
@@ -61,6 +66,16 @@ class MainTrayTests(unittest.TestCase):
 
         font_actions[-1].trigger()
         self.assertEqual(controller.font_sizes, [FONT_SIZE_OPTIONS["Large"]])
+
+        output_menu = actions[1].menu()
+        self.assertIsNotNone(output_menu)
+        output_actions = output_menu.actions()
+        self.assertEqual([action.text() for action in output_actions], list(OUTPUT_MODE_OPTIONS.keys()))
+        checked_output_action = next(action for action in output_actions if action.isChecked())
+        self.assertEqual(checked_output_action.text(), "Translate")
+
+        output_actions[-1].trigger()
+        self.assertEqual(controller.output_modes, [OUTPUT_MODE_OPTIONS["Both"]])
 
         tray.hide()
 
