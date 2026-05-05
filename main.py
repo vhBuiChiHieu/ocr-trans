@@ -89,7 +89,7 @@ def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTra
     for label, size in FONT_SIZE_OPTIONS.items():
         action = font_menu.addAction(label)
         action.setCheckable(True)
-        action.setChecked(size == DEFAULT_FONT_SIZE)
+        action.setChecked(size == controller.settings.font_size)
         font_action_group.addAction(action)
         action.triggered.connect(partial(controller.set_result_font_size, size))
 
@@ -100,7 +100,7 @@ def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTra
     for label, family in load_font_family_options().items():
         action = font_family_menu.addAction(label)
         action.setCheckable(True)
-        action.setChecked(label == DEFAULT_FONT_LABEL)
+        action.setChecked(family == controller.settings.font_family)
         font_family_action_group.addAction(action)
         action.triggered.connect(partial(controller.set_result_font_family, family))
 
@@ -111,7 +111,7 @@ def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTra
     for label, mode in OUTPUT_MODE_OPTIONS.items():
         action = output_menu.addAction(label)
         action.setCheckable(True)
-        action.setChecked(mode == OUTPUT_MODE_TRANSLATE)
+        action.setChecked(mode == controller.settings.output_mode)
         output_action_group.addAction(action)
         action.triggered.connect(partial(controller.set_output_mode, mode))
 

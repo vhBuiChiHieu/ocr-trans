@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRect, pyqtSignal
@@ -17,6 +17,7 @@ from core.preprocessor import ImagePreprocessor, PRESET_BASELINE
 from core.ocr_engine import OCR_MODE_NORMAL, OCREngine, OCRResult
 from core.ocr_history import OCRHistoryEntry, OCRHistoryStore
 from core.ocr_pipeline import OCRPipeline, OCRPipelineConfig
+from core.settings_store import AppSettings, SettingsStore
 from ui.selection_overlay import SelectionOverlay, SelectionResult
 from ui.result_overlay import ResultOverlay
 
@@ -60,6 +61,7 @@ class AppControllerDependencies:
     selection_overlay: SelectionOverlay
     result_overlay: ResultOverlay
     ocr_history: OCRHistoryStore
+    settings_store: SettingsStore
 
 
 class _ControllerBridge(QObject):
@@ -127,11 +129,15 @@ class AppController:
                 selection_overlay=SelectionOverlay(),
                 result_overlay=ResultOverlay(),
                 ocr_history=OCRHistoryStore(),
+                settings_store=SettingsStore(),
             )
         self._deps = deps
         self._translator = ScriptTranslator()
+        self._settings = self._deps.settings_store.load()
         self.state = STATE_IDLE
-        self._output_mode = OUTPUT_MODE_TRANSLATE
+        self._output_mode = self._settings.output_mode
+        self._deps.result_overlay.set_font_size(self._settings.font_size)
+        self._deps.result_overlay.set_font_family(self._settings.font_family)
         self._active_capture: MonitorCapture | None = None
         self._active_selection_rect = QRect()
         self._bridge = _ControllerBridge()
@@ -152,13 +158,21 @@ class AppController:
         self._active_selection_rect = QRect()
         self.transition_to(STATE_IDLE)
 
+    @property
+    def settings(self) -> AppSettings:
+        return self._settings
+
     def set_result_font_size(self, font_size: int) -> None:
         self._logger.info("Setting result overlay font size to %s", font_size)
+        self._settings = replace(self._settings, font_size=font_size)
         self._deps.result_overlay.set_font_size(font_size)
+        self._deps.settings_store.save(self._settings)
 
     def set_result_font_family(self, font_family: str) -> None:
         self._logger.info("Setting result overlay font family to %s", font_family)
+        self._settings = replace(self._settings, font_family=font_family)
         self._deps.result_overlay.set_font_family(font_family)
+        self._deps.settings_store.save(self._settings)
 
     def set_output_mode(self, mode: str) -> None:
         if mode not in _OUTPUT_MODES:
@@ -166,6 +180,8 @@ class AppController:
 
         self._logger.info("Setting output mode to %s", mode)
         self._output_mode = mode
+        self._settings = replace(self._settings, output_mode=mode)
+        self._deps.settings_store.save(self._settings)
 
     def _preload_ocr(self) -> None:
         try:

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QPoint, QRect, Qt
-from PyQt6.QtGui import QFont, QKeyEvent
-from PyQt6.QtWidgets import QLabel, QWidget
+from PyQt6.QtGui import QColor, QFont, QKeyEvent
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QLabel, QWidget
 
 from core.screenshot import MonitorCapture
 
@@ -20,10 +20,24 @@ class ResultOverlay(QWidget):
         self._font_size = font_size
         self._font_family = font_family
         self._label.setWordWrap(True)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._label.setStyleSheet("color: white; background: transparent;")
+        self._label.setObjectName("resultText")
+        self._label.setStyleSheet(
+            "QLabel#resultText {"
+            "color: #d7dde4;"
+            "background: transparent;"
+            "border: none;"
+            "border-radius: 0;"
+            "}"
+        )
         self._apply_font()
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(36)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(0, 0, 0, 170))
+        self.setGraphicsEffect(shadow)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -32,10 +46,13 @@ class ResultOverlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setObjectName("resultOverlay")
         self.setStyleSheet(
-            "background-color: rgba(18, 18, 18, 208);"
-            "border: none;"
-            "border-radius: 6px;"
+            "QWidget#resultOverlay {"
+            "background-color: rgba(11, 20, 26, 224);"
+            "border: 1px solid rgba(56, 189, 248, 95);"
+            "border-radius: 16px;"
+            "}"
         )
         self.hide()
 
@@ -61,13 +78,14 @@ class ResultOverlay(QWidget):
         self._label.setFont(QFont(self._font_family, self._font_size))
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss: Callable[[], None]) -> None:
-        padding = 12
-        gap = 12
+        padding = 28
+        gap = 14
 
         self._dismiss_callback = on_dismiss
         self._label.setText(text)
 
-        content_width = max(1, anchor_rect.width())
+        monitor_width = round(capture.monitor.width / capture.scale_x)
+        content_width = min(max(360, anchor_rect.width()), max(1, monitor_width - (padding * 2)))
         self._label.setFixedWidth(content_width)
         self._label.adjustSize()
 
@@ -78,7 +96,6 @@ class ResultOverlay(QWidget):
 
         monitor_left = round(capture.monitor.left / capture.scale_x)
         monitor_top = round(capture.monitor.top / capture.scale_y)
-        monitor_width = round(capture.monitor.width / capture.scale_x)
         monitor_height = round(capture.monitor.height / capture.scale_y)
         monitor_right = monitor_left + monitor_width
         monitor_bottom = monitor_top + monitor_height

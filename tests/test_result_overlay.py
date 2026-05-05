@@ -28,12 +28,15 @@ class ResultOverlayTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.overlay.hide_result()
 
-    def test_overlay_uses_minimal_style(self) -> None:
+    def test_overlay_uses_polished_style(self) -> None:
         style = self.overlay.styleSheet()
 
-        self.assertIn("border: none", style)
-        self.assertIn("border-radius: 6px", style)
-        self.assertIn("background-color: rgba(18, 18, 18, 208)", style)
+        self.assertIn("QWidget#resultOverlay", style)
+        self.assertIn("border: 1px solid rgba(56, 189, 248, 95)", style)
+        self.assertIn("border-radius: 16px", style)
+        self.assertIn("background-color: rgba(11, 20, 26, 224)", style)
+        self.assertIn("border: none", self.overlay._label.styleSheet())
+        self.assertIsNotNone(self.overlay.graphicsEffect())
 
     def test_overlay_uses_larger_default_font_size(self) -> None:
         self.assertEqual(self.overlay.font_size, DEFAULT_FONT_SIZE)
@@ -50,20 +53,20 @@ class ResultOverlayTests(unittest.TestCase):
 
         self.overlay.show_result("Detected text", anchor_rect, self.capture, on_dismiss=lambda: None)
 
-        self.assertEqual(self.overlay.width(), 144)
-        self.assertEqual(self.overlay._label.width(), 120)
-        self.assertEqual(self.overlay.x(), 120)
-        self.assertEqual(self.overlay.y(), 131)
+        self.assertEqual(self.overlay.width(), 300)
+        self.assertEqual(self.overlay._label.width(), 244)
+        self.assertEqual(self.overlay.x(), 100)
+        self.assertEqual(self.overlay.y(), 133)
 
     def test_show_result_moves_above_when_below_would_overflow(self) -> None:
         anchor_rect = QRect(20, 150, 120, 40)
 
         self.overlay.show_result("Detected text", anchor_rect, self.capture, on_dismiss=lambda: None)
 
-        self.assertEqual(self.overlay.width(), 144)
-        self.assertEqual(self.overlay._label.width(), 120)
-        self.assertEqual(self.overlay.x(), 120)
-        self.assertEqual(self.overlay.y() + self.overlay.height(), 188)
+        self.assertEqual(self.overlay.width(), 300)
+        self.assertEqual(self.overlay._label.width(), 244)
+        self.assertEqual(self.overlay.x(), 100)
+        self.assertEqual(self.overlay.y() + self.overlay.height(), 186)
 
     def test_escape_dismisses_overlay(self) -> None:
         dismissed = []
