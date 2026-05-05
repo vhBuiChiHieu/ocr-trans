@@ -131,6 +131,7 @@ class FakeResultOverlay:
         self.show_calls: list[tuple[str, QRect, MonitorCapture, object]] = []
         self.hide_calls = 0
         self.font_size = None
+        self.font_family = None
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss) -> None:
         self.show_calls.append((text, QRect(anchor_rect), capture, on_dismiss))
@@ -140,6 +141,9 @@ class FakeResultOverlay:
 
     def set_font_size(self, font_size: int) -> None:
         self.font_size = font_size
+
+    def set_font_family(self, font_family: str) -> None:
+        self.font_family = font_family
 
 
 class ImmediateThread:
@@ -457,6 +461,15 @@ class AppControllerTests(unittest.TestCase):
         controller.set_result_font_size(13)
 
         self.assertEqual(result_overlay.font_size, 13)
+
+    def test_set_result_font_family_updates_overlay(self) -> None:
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+
+        controller.set_result_font_family("Arial")
+
+        self.assertEqual(result_overlay.font_family, "Arial")
 
 
 if __name__ == "__main__":

@@ -156,6 +156,10 @@ class AppController:
         self._logger.info("Setting result overlay font size to %s", font_size)
         self._deps.result_overlay.set_font_size(font_size)
 
+    def set_result_font_family(self, font_family: str) -> None:
+        self._logger.info("Setting result overlay font family to %s", font_family)
+        self._deps.result_overlay.set_font_family(font_family)
+
     def set_output_mode(self, mode: str) -> None:
         if mode not in _OUTPUT_MODES:
             raise ValueError(f"Invalid output mode: {mode}")

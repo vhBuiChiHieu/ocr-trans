@@ -13,16 +13,17 @@ DEFAULT_FONT_SIZE = 14
 
 
 class ResultOverlay(QWidget):
-    def __init__(self, font_size: int = DEFAULT_FONT_SIZE) -> None:
+    def __init__(self, font_size: int = DEFAULT_FONT_SIZE, font_family: str = "Segoe UI") -> None:
         super().__init__()
         self._label = QLabel(self)
         self._dismiss_callback: Callable[[], None] | None = None
         self._font_size = font_size
+        self._font_family = font_family
         self._label.setWordWrap(True)
         self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._label.setStyleSheet("color: white; background: transparent;")
-        self._apply_font_size()
+        self._apply_font()
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -42,13 +43,22 @@ class ResultOverlay(QWidget):
     def font_size(self) -> int:
         return self._font_size
 
+    @property
+    def font_family(self) -> str:
+        return self._font_family
+
     def set_font_size(self, font_size: int) -> None:
         self._font_size = font_size
-        self._apply_font_size()
+        self._apply_font()
         self._label.adjustSize()
 
-    def _apply_font_size(self) -> None:
-        self._label.setFont(QFont("Segoe UI", self._font_size))
+    def set_font_family(self, font_family: str) -> None:
+        self._font_family = font_family
+        self._apply_font()
+        self._label.adjustSize()
+
+    def _apply_font(self) -> None:
+        self._label.setFont(QFont(self._font_family, self._font_size))
 
     def show_result(self, text: str, anchor_rect: QRect, capture: MonitorCapture, on_dismiss: Callable[[], None]) -> None:
         padding = 12

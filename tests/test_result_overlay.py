@@ -39,6 +39,12 @@ class ResultOverlayTests(unittest.TestCase):
         self.assertEqual(self.overlay.font_size, DEFAULT_FONT_SIZE)
         self.assertEqual(self.overlay._label.font().pointSize(), DEFAULT_FONT_SIZE)
 
+    def test_set_font_family_updates_label_font(self) -> None:
+        self.overlay.set_font_family("Arial")
+
+        self.assertEqual(self.overlay.font_family, "Arial")
+        self.assertEqual(self.overlay._label.font().family(), "Arial")
+
     def test_show_result_matches_anchor_width_and_places_below(self) -> None:
         anchor_rect = QRect(20, 30, 120, 40)
 
