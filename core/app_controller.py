@@ -7,6 +7,7 @@ import sys
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Iterable
 
 from PyQt6.QtCore import QObject, QRect, pyqtSignal
 
@@ -42,7 +43,8 @@ def _resource_path(relative_path: str) -> Path:
     return base_path / relative_path
 
 
-_TRANSLATE_SCRIPT_PATH = _resource_path("scripts/google_translate.py")
+_TRANSLATE_SCRIPT_DIR = _resource_path("scripts/trans-api")
+_DEFAULT_TRANSLATE_SCRIPT = "google_translate.py"
 _ALLOWED_STATES = {
     STATE_IDLE,
     STATE_SELECTING,
@@ -75,8 +77,16 @@ class TranslationError(RuntimeError):
 
 
 class ScriptTranslator:
-    def __init__(self, script_path: Path = _TRANSLATE_SCRIPT_PATH) -> None:
+    def __init__(self, script_path: Path) -> None:
         self._script_path = script_path
+
+    @property
+    def script_name(self) -> str:
+        return self._script_path.name
+
+    @property
+    def script_path(self) -> Path:
+        return self._script_path
 
     def translate(self, text: str, sl: str = "en", tl: str = "vi") -> str:
         escaped_text = text.replace("\n", "\\n")
@@ -109,6 +119,24 @@ class ScriptTranslator:
 
 
 class AppController:
+    @staticmethod
+    def list_translator_scripts(script_dir: Path = _TRANSLATE_SCRIPT_DIR) -> list[str]:
+        if not script_dir.exists():
+            return []
+        return sorted(path.name for path in script_dir.glob("*.py") if path.is_file())
+
+    @staticmethod
+    def _resolve_translator_script(script_name: str, script_dir: Path = _TRANSLATE_SCRIPT_DIR) -> Path:
+        if script_name and (script_dir / script_name).exists():
+            return script_dir / script_name
+        fallback = script_dir / _DEFAULT_TRANSLATE_SCRIPT
+        if fallback.exists():
+            return fallback
+        available = AppController.list_translator_scripts(script_dir)
+        if available:
+            return script_dir / available[0]
+        return fallback
+
     def __init__(self, logger: logging.Logger, deps: AppControllerDependencies | None = None) -> None:
         self._logger = logger
         if deps is None:
@@ -135,8 +163,12 @@ class AppController:
                 settings_store=SettingsStore(),
             )
         self._deps = deps
-        self._translator = ScriptTranslator()
         self._settings = self._deps.settings_store.load()
+        translator_path = self._resolve_translator_script(self._settings.translator_script)
+        self._translator = ScriptTranslator(script_path=translator_path)
+        if self._settings.translator_script != self._translator.script_name:
+            self._settings = replace(self._settings, translator_script=self._translator.script_name)
+            self._deps.settings_store.save(self._settings)
         self.state = STATE_IDLE
         self._output_mode = self._settings.output_mode
         self._deps.result_overlay.set_font_size(self._settings.font_size)
@@ -196,6 +228,16 @@ class AppController:
         self._logger.info("Setting output mode to %s", mode)
         self._output_mode = mode
         self._settings = replace(self._settings, output_mode=mode)
+        self._deps.settings_store.save(self._settings)
+
+    def set_translator_script(self, script_name: str) -> None:
+        script_path = self._resolve_translator_script(script_name)
+        if not script_path.exists() or script_path.name != script_name:
+            raise ValueError(f"Invalid translator script: {script_name}")
+
+        self._logger.info("Setting translator script to %s", script_name)
+        self._translator = ScriptTranslator(script_path=script_path)
+        self._settings = replace(self._settings, translator_script=script_name)
         self._deps.settings_store.save(self._settings)
 
     def _preload_ocr(self) -> None:

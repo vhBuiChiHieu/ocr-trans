@@ -6,3 +6,5 @@ paddleocr==3.5.0
 paddlepaddle==3.3.1
 pytest==9.0.3
 pyinstaller==6.20.0
+fastapi==0.116.1
+uvicorn==0.35.0

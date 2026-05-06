@@ -14,6 +14,7 @@ class AppSettings:
     font_size: int = 14
     font_family: str = "Segoe UI"
     output_mode: str = "translate"
+    translator_script: str = "google_translate.py"
     history_panel_width: int = 340
     history_panel_visible: bool = True
     history_panel_collapsed: bool = True
@@ -41,6 +42,7 @@ class SettingsStore:
             font_size=self._read_int(data, "font_size", settings.font_size),
             font_family=self._read_str(data, "font_family", settings.font_family),
             output_mode=self._read_str(data, "output_mode", settings.output_mode),
+            translator_script=self._read_str(data, "translator_script", settings.translator_script),
             history_panel_width=self._read_int(data, "history_panel_width", settings.history_panel_width),
             history_panel_visible=self._read_bool(data, "history_panel_visible", settings.history_panel_visible),
             history_panel_collapsed=self._read_bool(data, "history_panel_collapsed", settings.history_panel_collapsed),

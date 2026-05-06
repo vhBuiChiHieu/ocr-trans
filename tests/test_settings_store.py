@@ -27,6 +27,7 @@ class SettingsStoreTests(unittest.TestCase):
                     font_size=15,
                     font_family="JetBrains Mono",
                     output_mode="both",
+                    translator_script="local_translate_gemma_4b.py",
                     history_panel_width=420,
                     history_panel_visible=False,
                     history_panel_collapsed=False,
@@ -38,6 +39,7 @@ class SettingsStoreTests(unittest.TestCase):
         self.assertEqual(settings.font_size, 15)
         self.assertEqual(settings.font_family, "JetBrains Mono")
         self.assertEqual(settings.output_mode, "both")
+        self.assertEqual(settings.translator_script, "local_translate_gemma_4b.py")
         self.assertEqual(settings.history_panel_width, 420)
         self.assertEqual(settings.history_panel_visible, False)
         self.assertEqual(settings.history_panel_collapsed, False)

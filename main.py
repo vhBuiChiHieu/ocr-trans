@@ -13,6 +13,7 @@ from utils.logger import setup_logger
 
 APP_ICON_PATH = Path(__file__).resolve().parent / "imgs" / "app_icon.png"
 FONT_DIR_PATH = Path(__file__).resolve().parent / "fonts"
+TRANSLATOR_DIR_PATH = Path(__file__).resolve().parent / "scripts" / "trans-api"
 DEFAULT_FONT_FAMILY = "Segoe UI"
 DEFAULT_FONT_LABEL = "Default"
 
@@ -76,6 +77,13 @@ def load_font_family_options(font_dir: Path = FONT_DIR_PATH) -> dict[str, str]:
     return options
 
 
+def load_translator_options(script_dir: Path = TRANSLATOR_DIR_PATH) -> dict[str, str]:
+    if not script_dir.exists():
+        return {}
+    scripts = sorted(path.name for path in script_dir.glob("*.py") if path.is_file())
+    return {name: name for name in scripts}
+
+
 def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTrayIcon:
     tray_icon = QSystemTrayIcon()
     tray_icon.setToolTip("orc-trans-app")
@@ -114,6 +122,17 @@ def create_tray_icon(app: QApplication, controller: AppController) -> QSystemTra
         action.setChecked(mode == controller.settings.output_mode)
         output_action_group.addAction(action)
         action.triggered.connect(partial(controller.set_output_mode, mode))
+
+    translator_menu = menu.addMenu("Translator API")
+    translator_action_group = QActionGroup(translator_menu)
+    translator_action_group.setExclusive(True)
+
+    for label, script_name in load_translator_options().items():
+        action = translator_menu.addAction(label)
+        action.setCheckable(True)
+        action.setChecked(script_name == controller.settings.translator_script)
+        translator_action_group.addAction(action)
+        action.triggered.connect(partial(controller.set_translator_script, script_name))
 
     menu.addSeparator()
     menu.addAction("Exit", app.quit)

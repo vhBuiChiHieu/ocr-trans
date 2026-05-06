@@ -18,6 +18,7 @@ from main import (
     _load_tray_icon,
     create_tray_icon,
     load_font_family_options,
+    load_translator_options,
 )
 
 
@@ -26,6 +27,7 @@ class FakeController:
         self.font_sizes: list[int] = []
         self.output_modes: list[str] = []
         self.font_families: list[str] = []
+        self.translator_scripts: list[str] = []
         self.settings = AppSettings()
 
     def set_result_font_size(self, font_size: int) -> None:
@@ -36,6 +38,18 @@ class FakeController:
 
     def set_output_mode(self, mode: str) -> None:
         self.output_modes.append(mode)
+
+    def set_translator_script(self, script_name: str) -> None:
+        self.translator_scripts.append(script_name)
+        self.settings = AppSettings(
+            font_size=self.settings.font_size,
+            font_family=self.settings.font_family,
+            output_mode=self.settings.output_mode,
+            translator_script=script_name,
+            history_panel_width=self.settings.history_panel_width,
+            history_panel_visible=self.settings.history_panel_visible,
+            history_panel_collapsed=self.settings.history_panel_collapsed,
+        )
 
 
 class MainTrayTests(unittest.TestCase):
@@ -72,13 +86,28 @@ class MainTrayTests(unittest.TestCase):
         self.assertIsInstance(menu, QMenu)
 
         actions = menu.actions()
-        self.assertEqual(len(actions), 5)
+        self.assertEqual(len(actions), 6)
         self.assertEqual(actions[0].text(), "Font size")
         self.assertEqual(actions[1].text(), "Font family")
         self.assertEqual(actions[2].text(), "Output mode")
-        self.assertTrue(actions[3].isSeparator())
-        self.assertIsInstance(actions[4], QAction)
-        self.assertEqual(actions[4].text(), "Exit")
+        self.assertEqual(actions[3].text(), "Translator API")
+        self.assertTrue(actions[4].isSeparator())
+        self.assertIsInstance(actions[5], QAction)
+        self.assertEqual(actions[5].text(), "Exit")
+
+        translator_menu = actions[3].menu()
+        self.assertIsNotNone(translator_menu)
+        translator_actions = translator_menu.actions()
+        self.assertGreaterEqual(len(translator_actions), 1)
+        translator_actions[0].trigger()
+        self.assertEqual(controller.translator_scripts, [translator_actions[0].text()])
+
+        options = load_translator_options()
+        self.assertIn("google_translate.py", options)
+        self.assertIn("local_translate_gemma_4b.py", options)
+
+        checked_translator = next(action for action in translator_actions if action.isChecked())
+        self.assertEqual(checked_translator.text(), "google_translate.py")
 
         font_menu = actions[0].menu()
         self.assertIsNotNone(font_menu)
