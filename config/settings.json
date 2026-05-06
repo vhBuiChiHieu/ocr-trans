@@ -1,5 +1,8 @@
 {
   "font_size": 13,
   "font_family": "JetBrains Mono",
-  "output_mode": "translate"
+  "output_mode": "translate",
+  "history_panel_width": 340,
+  "history_panel_visible": true,
+  "history_panel_collapsed": true
 }

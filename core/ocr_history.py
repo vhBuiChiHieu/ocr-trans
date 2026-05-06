@@ -35,6 +35,21 @@ class OCRHistoryStore:
             encoding="utf-8",
         )
 
+    def list_entries(self) -> list[OCRHistoryEntry]:
+        entries = self._load_entries()[: self._limit]
+        normalized: list[OCRHistoryEntry] = []
+        for entry in entries:
+            normalized.append(
+                OCRHistoryEntry(
+                    mode=str(entry.get("mode", "translate")),
+                    ocr_text=str(entry.get("ocr_text", "")),
+                    display_text=str(entry.get("display_text", "")),
+                    translated_text=str(entry.get("translated_text", "")),
+                    created_at=str(entry.get("created_at", "")) or datetime.now().isoformat(timespec="seconds"),
+                )
+            )
+        return normalized
+
     def _load_entries(self) -> list[dict[str, Any]]:
         if not self._path.exists():
             return []

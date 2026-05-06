@@ -20,6 +20,7 @@ from core.ocr_pipeline import OCRPipeline, OCRPipelineConfig
 from core.settings_store import AppSettings, SettingsStore
 from ui.selection_overlay import SelectionOverlay, SelectionResult
 from ui.result_overlay import ResultOverlay
+from ui.history_panel import HistoryPanel
 
 
 STATE_IDLE = "idle"
@@ -60,6 +61,7 @@ class AppControllerDependencies:
     ocr_pipeline: OCRPipeline
     selection_overlay: SelectionOverlay
     result_overlay: ResultOverlay
+    history_panel: HistoryPanel
     ocr_history: OCRHistoryStore
     settings_store: SettingsStore
 
@@ -128,6 +130,7 @@ class AppController:
                 ),
                 selection_overlay=SelectionOverlay(),
                 result_overlay=ResultOverlay(),
+                history_panel=HistoryPanel(),
                 ocr_history=OCRHistoryStore(),
                 settings_store=SettingsStore(),
             )
@@ -138,6 +141,12 @@ class AppController:
         self._output_mode = self._settings.output_mode
         self._deps.result_overlay.set_font_size(self._settings.font_size)
         self._deps.result_overlay.set_font_family(self._settings.font_family)
+        self._deps.history_panel.set_font_size(self._settings.font_size)
+        self._deps.history_panel.set_font_family(self._settings.font_family)
+        self._deps.history_panel.set_panel_width(self._settings.history_panel_width)
+        self._deps.history_panel.set_collapsed(self._settings.history_panel_collapsed)
+        self._deps.history_panel.set_width_changed_callback(self._on_history_panel_width_changed)
+        self._deps.history_panel.set_toggle_callback(self._on_history_panel_collapsed_changed)
         self._active_capture: MonitorCapture | None = None
         self._active_selection_rect = QRect()
         self._bridge = _ControllerBridge()
@@ -146,6 +155,9 @@ class AppController:
     def start(self) -> None:
         self._logger.info("Controller start")
         self._deps.hotkey.start()
+        self._refresh_history_panel_entries()
+        if self._settings.history_panel_visible:
+            self._deps.history_panel.show_docked_right()
 
         threading.Thread(target=self._preload_ocr, name="ocr-preload", daemon=True).start()
 
@@ -153,6 +165,7 @@ class AppController:
         self._logger.info("Controller stop")
         self._deps.selection_overlay.hide_overlay()
         self._deps.result_overlay.hide_result()
+        self._deps.history_panel.hide()
         self._deps.hotkey.stop()
         self._active_capture = None
         self._active_selection_rect = QRect()
@@ -166,12 +179,14 @@ class AppController:
         self._logger.info("Setting result overlay font size to %s", font_size)
         self._settings = replace(self._settings, font_size=font_size)
         self._deps.result_overlay.set_font_size(font_size)
+        self._deps.history_panel.set_font_size(font_size)
         self._deps.settings_store.save(self._settings)
 
     def set_result_font_family(self, font_family: str) -> None:
         self._logger.info("Setting result overlay font family to %s", font_family)
         self._settings = replace(self._settings, font_family=font_family)
         self._deps.result_overlay.set_font_family(font_family)
+        self._deps.history_panel.set_font_family(font_family)
         self._deps.settings_store.save(self._settings)
 
     def set_output_mode(self, mode: str) -> None:
@@ -322,6 +337,7 @@ class AppController:
                 display_text=display_text,
             )
         )
+        self._refresh_history_panel_entries()
 
         self._deps.result_overlay.show_result(
             display_text,
@@ -360,6 +376,22 @@ class AppController:
         self._deps.result_overlay.hide_result()
         self._active_selection_rect = QRect()
         self.transition_to(STATE_IDLE)
+
+    def _refresh_history_panel_entries(self) -> None:
+        entries = self._deps.ocr_history.list_entries()
+        self._deps.history_panel.set_entries(entries)
+
+    def _on_history_panel_width_changed(self, width: int) -> None:
+        if width == self._settings.history_panel_width:
+            return
+        self._settings = replace(self._settings, history_panel_width=width)
+        self._deps.settings_store.save(self._settings)
+
+    def _on_history_panel_collapsed_changed(self, collapsed: bool) -> None:
+        if collapsed == self._settings.history_panel_collapsed:
+            return
+        self._settings = replace(self._settings, history_panel_collapsed=collapsed)
+        self._deps.settings_store.save(self._settings)
 
     def transition_to(self, new_state: str) -> None:
         if new_state not in _ALLOWED_STATES:

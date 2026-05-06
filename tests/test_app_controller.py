@@ -126,6 +126,58 @@ class FakeHistoryStore:
     def add(self, entry) -> None:
         self.entries.append(entry)
 
+    def list_entries(self):
+        return list(reversed(self.entries))
+
+
+class FakeHistoryPanel:
+    def __init__(self) -> None:
+        self.entries_updates = []
+        self.font_size = None
+        self.font_family = None
+        self.panel_width = None
+        self.collapsed = True
+        self.width_callback = None
+        self.toggle_callback = None
+        self.show_calls = 0
+        self.hide_calls = 0
+
+    def set_entries(self, entries) -> None:
+        self.entries_updates.append(entries)
+
+    def set_font_size(self, font_size: int) -> None:
+        self.font_size = font_size
+
+    def set_font_family(self, font_family: str) -> None:
+        self.font_family = font_family
+
+    def set_panel_width(self, width: int) -> None:
+        self.panel_width = width
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self.collapsed = collapsed
+
+    def set_width_changed_callback(self, callback) -> None:
+        self.width_callback = callback
+
+    def set_toggle_callback(self, callback) -> None:
+        self.toggle_callback = callback
+
+    def show_docked_right(self) -> None:
+        self.show_calls += 1
+
+    def hide(self) -> None:
+        self.hide_calls += 1
+
+    def emit_width_changed(self, width: int) -> None:
+        if self.width_callback is not None:
+            self.width_callback(width)
+
+    def emit_toggle(self, collapsed: bool) -> None:
+        self.collapsed = collapsed
+        if self.toggle_callback is not None:
+            self.toggle_callback(collapsed)
+
 
 class FakeSettingsStore:
     def __init__(self, settings: AppSettings | None = None) -> None:
@@ -234,6 +286,7 @@ class AppControllerTests(unittest.TestCase):
         crop_rect: PixelRect | None = None,
         invalid_crop: bool = False,
         translator: FakeTranslator | None = None,
+        settings: AppSettings | None = None,
     ):
         preprocessed = np.arange(20 * 20 * 3, dtype=np.uint8).reshape((20, 20, 3))
         hotkey = FakeHotkeyManager()
@@ -248,7 +301,8 @@ class AppControllerTests(unittest.TestCase):
         selection_overlay = FakeSelectionOverlay()
         result_overlay = FakeResultOverlay()
         history = FakeHistoryStore()
-        settings_store = FakeSettingsStore()
+        history_panel = FakeHistoryPanel()
+        settings_store = FakeSettingsStore(settings)
         deps = AppControllerDependencies(
             hotkey=hotkey,
             screenshot=screenshot,
@@ -258,15 +312,16 @@ class AppControllerTests(unittest.TestCase):
             ocr_pipeline=ocr_pipeline,
             selection_overlay=selection_overlay,
             result_overlay=result_overlay,
+            history_panel=history_panel,
             ocr_history=history,
             settings_store=settings_store,
         )
         controller = AppController(logger=self.logger, deps=deps)
         controller._translator = translator or FakeTranslator()
-        return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay, history, settings_store
+        return controller, ocr_pipeline, ocr_engine, selection_overlay, result_overlay, history, history_panel, settings_store
 
     def test_start_warms_ocr_in_background(self) -> None:
-        controller, _ocr_pipeline, ocr_engine, _selection_overlay, _result_overlay, _history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, ocr_engine, _selection_overlay, _result_overlay, _history, _history_panel, _settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         thread_patch = patch_thread()
@@ -277,9 +332,52 @@ class AppControllerTests(unittest.TestCase):
 
         self.assertTrue(controller._deps.hotkey.started)
         self.assertEqual(ocr_engine.preload_calls, 1)
+        self.assertEqual(controller._deps.history_panel.show_calls, 1)
+        self.assertEqual(len(controller._deps.history_panel.entries_updates), 1)
+        self.assertEqual(controller._deps.history_panel.entries_updates[0], [])
+
+    def test_start_keeps_history_panel_hidden_when_visibility_setting_is_false(self) -> None:
+        settings = AppSettings(history_panel_visible=False)
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, history_panel, _settings_store = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+        controller._settings = settings
+        thread_patch = patch_thread()
+        try:
+            controller.start()
+        finally:
+            thread_patch.restore()
+
+        self.assertEqual(history_panel.show_calls, 0)
+
+    def test_history_panel_collapsed_toggle_saves_settings(self) -> None:
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, history_panel, settings_store = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+
+        history_panel.emit_toggle(False)
+
+        self.assertEqual(settings_store.saved_settings[-1].history_panel_collapsed, False)
+
+    def test_controller_applies_saved_collapsed_setting_on_init(self) -> None:
+        _controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, history_panel, _settings_store = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text"),
+            settings=AppSettings(history_panel_collapsed=False),
+        )
+
+        self.assertEqual(history_panel.collapsed, False)
+
+    def test_history_panel_width_change_saves_settings(self) -> None:
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, history_panel, settings_store = self.make_controller(
+            OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
+        )
+
+        history_panel.emit_width_changed(420)
+
+        self.assertEqual(settings_store.saved_settings[-1].history_panel_width, 420)
 
     def test_handle_hotkey_starts_selection_flow(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history, _history_panel, _settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
@@ -290,7 +388,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_translates_ocr_text_before_showing_result_overlay(self) -> None:
         translator = FakeTranslator(translated_text="Van ban da dich")
-        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -321,10 +419,12 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(history.entries[0].ocr_text, "Detected text")
         self.assertEqual(history.entries[0].translated_text, "Van ban da dich")
         self.assertEqual(history.entries[0].display_text, "Van ban da dich")
+        self.assertEqual(len(history_panel.entries_updates[-1]), 1)
+        self.assertEqual(history_panel.entries_updates[-1][0].display_text, "Van ban da dich")
 
     def test_confirm_selection_ocr_only_skips_translation(self) -> None:
         translator = FakeTranslator(translated_text="Van ban da dich")
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -349,7 +449,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_both_mode_shows_ocr_and_translation(self) -> None:
         translator = FakeTranslator(translated_text="Van ban da dich")
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -374,7 +474,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_falls_back_to_ocr_text_when_translation_returns_empty(self) -> None:
         translator = FakeTranslator(translated_text="   ")
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -397,7 +497,7 @@ class AppControllerTests(unittest.TestCase):
 
     def test_confirm_selection_falls_back_to_ocr_text_when_translation_fails(self) -> None:
         translator = FakeTranslator(error=TranslationError("boom"))
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Line 1\nLine 2", confidence=0.95)],
                 display_text="Line 1\nLine 2",
@@ -420,7 +520,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(text, "Line 1\nLine 2")
 
     def test_confirm_selection_returns_idle_for_invalid_crop(self) -> None:
-        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, history_panel, _settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text"),
             invalid_crop=True,
         )
@@ -435,7 +535,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(history.entries, [])
 
     def test_handle_hotkey_ignores_input_while_processing(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, _result_overlay, _history, _history_panel, _settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
         controller.transition_to(STATE_PROCESSING)
@@ -446,7 +546,7 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(controller.state, STATE_PROCESSING)
 
     def test_dismiss_result_returns_idle(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, selection_overlay, result_overlay, history, _history_panel, _settings_store = self.make_controller(
             OCRResult(
                 lines=[OCRLine(text="Detected text", confidence=0.95)],
                 display_text="Detected text",
@@ -469,27 +569,29 @@ class AppControllerTests(unittest.TestCase):
         self.assertEqual(result_overlay.hide_calls, 1)
 
     def test_set_result_font_size_updates_overlay(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history, settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history, _history_panel, settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
         controller.set_result_font_size(13)
 
         self.assertEqual(result_overlay.font_size, 13)
+        self.assertEqual(_history_panel.font_size, 13)
         self.assertEqual(settings_store.saved_settings[-1].font_size, 13)
 
     def test_set_result_font_family_updates_overlay(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history, settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, result_overlay, _history, _history_panel, settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
         controller.set_result_font_family("Arial")
 
         self.assertEqual(result_overlay.font_family, "Arial")
+        self.assertEqual(_history_panel.font_family, "Arial")
         self.assertEqual(settings_store.saved_settings[-1].font_family, "Arial")
 
     def test_set_output_mode_saves_settings(self) -> None:
-        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, settings_store = self.make_controller(
+        controller, _ocr_pipeline, _ocr_engine, _selection_overlay, _result_overlay, _history, _history_panel, settings_store = self.make_controller(
             OCRResult(lines=[], display_text="", average_confidence=0.0, status="no_text")
         )
 
