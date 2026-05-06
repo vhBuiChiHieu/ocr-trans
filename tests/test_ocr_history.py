@@ -4,21 +4,30 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from core.ocr_history import OCRHistoryEntry, OCRHistoryStore
 
 
 class OCRHistoryStoreTests(unittest.TestCase):
+    def _today_history_path(self, root: Path) -> Path:
+        from datetime import datetime
+
+        date_key = datetime.now().strftime("%Y-%m-%d")
+        return root / "logs" / f"ocr_history_{date_key}.json"
+
     def test_add_writes_recent_entries_as_utf8_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "history.json"
-            store = OCRHistoryStore(path=path, limit=2)
+            temp_root = Path(temp_dir)
+            store = OCRHistoryStore(limit=2)
 
-            store.add(OCRHistoryEntry(mode="translate", ocr_text="hello", translated_text="xin chào", display_text="xin chào"))
-            store.add(OCRHistoryEntry(mode="ocr_only", ocr_text="second", display_text="second"))
-            store.add(OCRHistoryEntry(mode="both", ocr_text="third", translated_text="ba", display_text="third\n\nba"))
+            with patch("core.ocr_history.DEFAULT_HISTORY_DIR", temp_root / "logs"):
+                store.add(OCRHistoryEntry(mode="translate", ocr_text="hello", translated_text="xin chào", display_text="xin chào"))
+                store.add(OCRHistoryEntry(mode="ocr_only", ocr_text="second", display_text="second"))
+                store.add(OCRHistoryEntry(mode="both", ocr_text="third", translated_text="ba", display_text="third\n\nba"))
 
-            entries = json.loads(path.read_text(encoding="utf-8"))
+                path = self._today_history_path(temp_root)
+                entries = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0]["mode"], "both")

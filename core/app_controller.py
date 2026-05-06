@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
@@ -393,12 +394,16 @@ class AppController:
         if self._output_mode == OUTPUT_MODE_OCR_ONLY:
             return ""
 
+        started_at = time.perf_counter()
         try:
             translated_text = self._translator.translate(text)
         except TranslationError:
-            self._logger.exception("Translation failed")
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            self._logger.exception("Translation failed after %.1f ms", elapsed_ms)
             return ""
 
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        self._logger.info("Translation script roundtrip took %.1f ms", elapsed_ms)
         translated_text = translated_text.strip()
         if translated_text:
             self._logger.info("Translated text:\n%s", translated_text)

@@ -40,12 +40,22 @@ class TranslateResponse(BaseModel):
     latency_ms: int
 
 
+LANGUAGE_NAMES = {
+    "en": "English",
+    "vi": "Vietnamese",
+}
+
+
 def _build_prompt(text: str, source_lang: str, target_lang: str) -> str:
+    source_code = source_lang.strip()
+    target_code = target_lang.strip()
+    source_name = LANGUAGE_NAMES.get(source_code.lower(), source_code)
+    target_name = LANGUAGE_NAMES.get(target_code.lower(), target_code)
     return (
-        f"You are a professional {source_lang} ({source_lang}) to {target_lang} ({target_lang}) translator. "
-        f"Your goal is to accurately convey the meaning and nuances of the original {source_lang} text while adhering to {target_lang} grammar, vocabulary, and cultural sensitivities.\n"
-        f"Produce only the {target_lang} translation, without any additional explanations or commentary. "
-        f"Please translate the following {source_lang} text into {target_lang}:\n\n\n"
+        f"You are a professional {source_name} ({source_code}) to {target_name} ({target_code}) translator. "
+        f"Your goal is to accurately convey the meaning and nuances of the original {source_name} text while adhering to {target_name} grammar, vocabulary, and cultural sensitivities.\n"
+        f"Produce only the {target_name} translation, without any additional explanations or commentary. "
+        f"Please translate the following {source_name} text into {target_name}:\n\n\n"
         f"{text}"
     )
 

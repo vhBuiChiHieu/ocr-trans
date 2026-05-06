@@ -8,7 +8,8 @@ from typing import Any
 
 
 DEFAULT_HISTORY_LIMIT = 20
-DEFAULT_HISTORY_PATH = Path("logs") / "ocr_history.json"
+DEFAULT_HISTORY_DIR = Path("logs")
+DEFAULT_HISTORY_FILE_TEMPLATE = "ocr_history_{date}.json"
 
 
 @dataclass
@@ -21,22 +22,29 @@ class OCRHistoryEntry:
 
 
 class OCRHistoryStore:
-    def __init__(self, path: Path = DEFAULT_HISTORY_PATH, limit: int = DEFAULT_HISTORY_LIMIT) -> None:
+    def __init__(self, path: Path | None = None, limit: int = DEFAULT_HISTORY_LIMIT) -> None:
         self._path = path
         self._limit = limit
 
+    def _today_path(self) -> Path:
+        if self._path is not None:
+            return self._path
+        date_key = datetime.now().strftime("%Y-%m-%d")
+        return DEFAULT_HISTORY_DIR / DEFAULT_HISTORY_FILE_TEMPLATE.format(date=date_key)
+
     def add(self, entry: OCRHistoryEntry) -> None:
-        entries = self._load_entries()
+        path = self._today_path()
+        entries = self._load_entries(path)
         entries.insert(0, asdict(entry))
         entries = entries[: self._limit]
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
             json.dumps(entries, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
     def list_entries(self) -> list[OCRHistoryEntry]:
-        entries = self._load_entries()[: self._limit]
+        entries = self._load_entries(self._today_path())[: self._limit]
         normalized: list[OCRHistoryEntry] = []
         for entry in entries:
             normalized.append(
@@ -50,12 +58,12 @@ class OCRHistoryStore:
             )
         return normalized
 
-    def _load_entries(self) -> list[dict[str, Any]]:
-        if not self._path.exists():
+    def _load_entries(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
             return []
 
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return []
 
