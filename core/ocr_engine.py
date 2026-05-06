@@ -222,40 +222,38 @@ class OCREngine:
 
     @staticmethod
     def _build_display_text(lines: list[OCRLine]) -> str:
-        return "\n".join(line.text for line in lines if line.text)
+        segments = [line.text for line in lines if line.text]
+        if not segments:
+            return ""
+        if any(line.box is not None for line in lines):
+            return "\n".join(segments)
+        return OCREngine._join_segments_into_sentences(segments)
 
     @staticmethod
     def _join_segments_into_sentences(segments) -> str:
-        normalized_segments: list[tuple[str, bool]] = []
+        normalized_segments: list[str] = []
         for segment in segments:
-            raw_segment = str(segment)
-            normalized_segment = raw_segment.strip()
-            if not normalized_segment:
-                continue
-            has_trailing_linebreak = raw_segment.rstrip(" \t").endswith(("\n", "\r"))
-            normalized_segments.append((normalized_segment, has_trailing_linebreak))
+            normalized_segment = str(segment).strip()
+            if normalized_segment:
+                normalized_segments.append(normalized_segment)
 
-        lines: list[str] = []
-        current = ""
-        for index, (normalized_segment, has_trailing_linebreak) in enumerate(normalized_segments):
-            if current:
-                current = f"{current} {normalized_segment}"
-            else:
-                current = normalized_segment
+        if not normalized_segments:
+            return ""
 
-            next_segment = normalized_segments[index + 1][0] if index + 1 < len(normalized_segments) else ""
-            should_break = OCREngine._ends_with_sentence_punctuation(normalized_segment) or (
-                has_trailing_linebreak
-                and next_segment
-                and OCREngine._starts_with_uppercase_word(next_segment)
-                and not OCREngine._ends_with_comma(normalized_segment)
+        lines: list[str] = [normalized_segments[0]]
+        for index in range(1, len(normalized_segments)):
+            previous_segment = normalized_segments[index - 1]
+            current_segment = normalized_segments[index]
+            starts_with_quote = current_segment.lstrip().startswith(('"', "'", '”', '’'))
+            should_keep_break = OCREngine._ends_with_sentence_punctuation(previous_segment) or (
+                OCREngine._starts_with_uppercase_word(current_segment)
+                and (not OCREngine._ends_with_comma(previous_segment) or starts_with_quote)
             )
-            if should_break:
-                lines.append(current)
-                current = ""
 
-        if current:
-            lines.append(current)
+            if should_keep_break:
+                lines.append(current_segment)
+            else:
+                lines[-1] = f"{lines[-1]} {current_segment}"
 
         return "\n".join(lines)
 
