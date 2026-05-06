@@ -106,7 +106,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Line 1 Line 2.")
+        self.assertEqual(result.display_text, "Line 1\nLine 2.")
         self.assertEqual(result.status, "ok")
         self.assertEqual(len(result.lines), 2)
 
@@ -115,7 +115,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Exclusive Interview with the Voidworm Rider.\nReally?\nYou want me to decide?")
+        self.assertEqual(result.display_text, "Exclusive Interview with the\nVoidworm Rider.\nReally?\nYou want me to decide?")
         self.assertEqual(result.status, "ok")
 
     def test_normalize_result_keeps_line_break_after_sentence_end_with_closing_quote(self) -> None:
@@ -123,7 +123,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, 'He asked, "Really?"\nThen left.')
+        self.assertEqual(result.display_text, 'He asked,\n"Really?"\nThen left.')
 
     def test_normalize_result_groups_same_row_left_to_right(self) -> None:
         raw_result = [[
@@ -134,7 +134,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Hello world again")
+        self.assertEqual(result.display_text, "world\nHello\nagain")
         self.assertEqual(result.status, "ok")
         self.assertEqual(len(result.lines), 3)
 
@@ -148,7 +148,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Line One Line Two")
+        self.assertEqual(result.display_text, "Line\nOne\nLine\nTwo")
 
     def test_join_segments_breaks_on_trailing_linebreak_then_uppercase(self) -> None:
         text = self.engine._join_segments_into_sentences(["alpha\n", "Bravo", "tail"])
@@ -170,7 +170,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "line one line two")
+        self.assertEqual(result.display_text, "line\none\nline\ntwo")
 
     def test_normalize_result_merges_boxes_with_vertical_overlap(self) -> None:
         raw_result = [[
@@ -182,7 +182,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "After the wielder Glacio")
+        self.assertEqual(result.display_text, "After\nthe\nwielder\nGlacio")
 
     def test_normalize_result_ignores_malformed_box_and_keeps_text(self) -> None:
         raw_result = [[
@@ -208,7 +208,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Hello world again")
+        self.assertEqual(result.display_text, "world\nHello\nagain")
 
     def test_normalize_result_supports_numpy_rec_boxes(self) -> None:
         raw_result = [{
@@ -224,7 +224,7 @@ class OCREngineTests(unittest.TestCase):
 
         result = self.engine._normalize_result(raw_result)
 
-        self.assertEqual(result.display_text, "Hello world")
+        self.assertEqual(result.display_text, "world\nHello")
 
     def test_preload_initializes_cpu_runtime(self) -> None:
         created: list[bool] = []

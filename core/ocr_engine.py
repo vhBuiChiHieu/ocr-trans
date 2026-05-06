@@ -154,7 +154,6 @@ class OCREngine:
 
         device = "gpu:0" if use_gpu else "cpu"
         kwargs: dict[str, Any] = {
-            "lang": "en",
             "device": device,
             "text_detection_model_name": "PP-OCRv5_mobile_det",
             "text_recognition_model_name": "en_PP-OCRv5_mobile_rec",
@@ -223,39 +222,7 @@ class OCREngine:
 
     @staticmethod
     def _build_display_text(lines: list[OCRLine]) -> str:
-        geometric_lines = [line for line in lines if line.center_x is not None and line.center_y is not None]
-        if not geometric_lines:
-            return OCREngine._join_segments_into_sentences(line.text for line in lines)
-
-        row_heights = [line.height for line in geometric_lines if line.height is not None and line.height > 0]
-        row_threshold = max(8.0, median(row_heights) * 0.9) if row_heights else 14.0
-
-        rows: list[list[OCRLine]] = []
-        pending_unpositioned: list[OCRLine] = []
-        for line in sorted(
-            lines,
-            key=lambda current: (
-                float("inf") if current.center_y is None else current.center_y,
-                float("inf") if current.center_x is None else current.center_x,
-            ),
-        ):
-            if line.center_y is None or line.center_x is None:
-                pending_unpositioned.append(line)
-                continue
-
-            if not rows or not OCREngine._should_merge_into_row(rows[-1], line, row_threshold):
-                rows.append([line])
-                continue
-
-            rows[-1].append(line)
-
-        rendered_rows = [
-            " ".join(item.text for item in sorted(row, key=lambda current: current.center_x or 0.0))
-            for row in rows
-            if row
-        ]
-        rendered_rows.extend(line.text for line in pending_unpositioned)
-        return OCREngine._join_segments_into_sentences(rendered_rows)
+        return "\n".join(line.text for line in lines if line.text)
 
     @staticmethod
     def _join_segments_into_sentences(segments) -> str:
