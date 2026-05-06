@@ -150,6 +150,28 @@ class OCREngineTests(unittest.TestCase):
 
         self.assertEqual(result.display_text, "Line One Line Two")
 
+    def test_join_segments_breaks_on_trailing_linebreak_then_uppercase(self) -> None:
+        text = self.engine._join_segments_into_sentences(["alpha\n", "Bravo", "tail"])
+
+        self.assertEqual(text, "alpha\nBravo tail")
+
+    def test_join_segments_keeps_join_when_trailing_linebreak_before_comma_then_uppercase(self) -> None:
+        text = self.engine._join_segments_into_sentences(["alpha,\n", "Bravo", "tail"])
+
+        self.assertEqual(text, "alpha, Bravo tail")
+
+    def test_normalize_result_keeps_join_when_next_row_starts_lowercase(self) -> None:
+        raw_result = [[
+            make_legacy_item("line", 0.95, [[10, 10], [40, 10], [40, 30], [10, 30]]),
+            make_legacy_item("one", 0.95, [[50, 12], [88, 12], [88, 32], [50, 32]]),
+            make_legacy_item("line", 0.95, [[12, 70], [42, 70], [42, 90], [12, 90]]),
+            make_legacy_item("two", 0.95, [[52, 70], [86, 70], [86, 90], [52, 90]]),
+        ]]
+
+        result = self.engine._normalize_result(raw_result)
+
+        self.assertEqual(result.display_text, "line one line two")
+
     def test_normalize_result_merges_boxes_with_vertical_overlap(self) -> None:
         raw_result = [[
             make_legacy_item("After", 0.95, [[10, 10], [50, 10], [50, 32], [10, 32]]),

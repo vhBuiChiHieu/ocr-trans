@@ -259,17 +259,31 @@ class OCREngine:
 
     @staticmethod
     def _join_segments_into_sentences(segments) -> str:
-        lines: list[str] = []
-        current = ""
+        normalized_segments: list[tuple[str, bool]] = []
         for segment in segments:
-            normalized_segment = str(segment).strip()
+            raw_segment = str(segment)
+            normalized_segment = raw_segment.strip()
             if not normalized_segment:
                 continue
+            has_trailing_linebreak = raw_segment.rstrip(" \t").endswith(("\n", "\r"))
+            normalized_segments.append((normalized_segment, has_trailing_linebreak))
+
+        lines: list[str] = []
+        current = ""
+        for index, (normalized_segment, has_trailing_linebreak) in enumerate(normalized_segments):
             if current:
                 current = f"{current} {normalized_segment}"
             else:
                 current = normalized_segment
-            if OCREngine._ends_with_sentence_punctuation(normalized_segment):
+
+            next_segment = normalized_segments[index + 1][0] if index + 1 < len(normalized_segments) else ""
+            should_break = OCREngine._ends_with_sentence_punctuation(normalized_segment) or (
+                has_trailing_linebreak
+                and next_segment
+                and OCREngine._starts_with_uppercase_word(next_segment)
+                and not OCREngine._ends_with_comma(normalized_segment)
+            )
+            if should_break:
                 lines.append(current)
                 current = ""
 
@@ -277,6 +291,27 @@ class OCREngine:
             lines.append(current)
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _starts_with_uppercase_word(text: str) -> bool:
+        stripped = text.lstrip('"\'”’([{')
+        if not stripped:
+            return False
+
+        for character in stripped:
+            if character.isalpha():
+                return character.isupper()
+            if character.isdigit():
+                return False
+
+        return False
+
+    @staticmethod
+    def _ends_with_comma(text: str) -> bool:
+        stripped = text.rstrip()
+        while stripped and stripped[-1] in '"\'”’)]}':
+            stripped = stripped[:-1].rstrip()
+        return stripped.endswith(",")
 
     @staticmethod
     def _ends_with_sentence_punctuation(text: str) -> bool:
